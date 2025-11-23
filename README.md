@@ -43,6 +43,17 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 - Run the placeholder CLI: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona`
   - Currently prints a stub message; real TUI/commands arrive in later epics.
 
+## Configuration & data directories
+- Base directory: `~/.lincona/` (override with env `LINCONA_HOME=/custom/path`).
+- Files:
+  - `config.toml` – persisted defaults (see docs/mvp_00/03_EPIC_02.md).
+  - `sessions/<id>.jsonl` – append-only session transcripts.
+  - `logs/<id>.log` – per-session plaintext logs (truncated to 5MB by default).
+- Environment: `OPENAI_API_KEY` overrides `api_key` in config.
+
+## Architecture quick peek
+See `ARCHITECTURE.md` for a current overview of config loading, persistence, logging, and shutdown handling.
+
 ## Maintenance tips
 - After changing dependencies, regenerate the lockfile: `make lock`
 - If the virtualenv breaks, remove `.venv/` and run `make install`
