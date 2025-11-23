@@ -1,12 +1,23 @@
 import json
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
-from lincona.sessions import Event, JsonlEventWriter, Role, generate_session_id, iter_events
+from lincona.sessions import (
+    Event,
+    JsonlEventWriter,
+    Role,
+    delete_session,
+    generate_session_id,
+    iter_events,
+    list_sessions,
+    resume_session,
+    session_path,
+)
 
 
 def sample_event(ts: datetime | None = None) -> Event:
@@ -69,3 +80,36 @@ def test_iter_events_raises_on_invalid_line(tmp_path: Path) -> None:
 
     with pytest.raises((ValidationError, json.JSONDecodeError)):
         list(iter_events(path))
+
+
+def test_session_list_resume_delete(tmp_path: Path) -> None:
+    base_dir = tmp_path / "sessions"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    session_id = "202501020304-11111111-1111-4111-8111-111111111111"
+    path = session_path(session_id, base_dir)
+
+    event = sample_event()
+    with JsonlEventWriter(path) as writer:
+        writer.append(event)
+
+    # Touch second file with older mtime to verify sorting
+    older_id = "202401010101-22222222-2222-4222-8222-222222222222"
+    older_path = session_path(older_id, base_dir)
+    older_path.write_text("", encoding="utf-8")
+    past = datetime.now(UTC) - timedelta(days=1)
+    mod_time = past.timestamp()
+    os.utime(older_path, (mod_time, mod_time))
+
+    sessions = list_sessions(base_dir)
+    assert [s.session_id for s in sessions] == [session_id, older_id]
+    assert sessions[0].path == path
+    assert sessions[0].size_bytes == path.stat().st_size
+
+    events = list(resume_session(session_id, base_dir))
+    assert events == [event]
+
+    delete_session(session_id, base_dir)
+    assert not path.exists()
+
+    # Deleting again should be silent
+    delete_session(session_id, base_dir)

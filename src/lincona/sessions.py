@@ -1,4 +1,4 @@
-"""Session utilities: IDs and JSONL event persistence."""
+"""Session utilities: IDs, JSONL persistence, and session helpers."""
 
 from __future__ import annotations
 
@@ -97,4 +97,68 @@ def iter_events(path: Path | str) -> Iterator[Event]:
         yield Event.model_validate_json(stripped)
 
 
-__all__ = ["Role", "Event", "generate_session_id", "JsonlEventWriter", "iter_events"]
+SESSIONS_DIR = Path.home() / ".lincona" / "sessions"
+
+
+def session_path(session_id: str, base_dir: Path | None = None) -> Path:
+    directory = base_dir or SESSIONS_DIR
+    return directory / f"{session_id}.jsonl"
+
+
+class SessionInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    session_id: str
+    path: Path
+    modified_at: datetime
+    size_bytes: int
+
+
+def list_sessions(base_dir: Path | None = None) -> list[SessionInfo]:
+    directory = base_dir or SESSIONS_DIR
+    if not directory.exists():
+        return []
+
+    entries: list[SessionInfo] = []
+    for path in directory.glob("*.jsonl"):
+        session_id = path.stem
+        stat_result = path.stat()
+        entries.append(
+            SessionInfo(
+                session_id=session_id,
+                path=path,
+                modified_at=datetime.fromtimestamp(stat_result.st_mtime, tz=UTC),
+                size_bytes=stat_result.st_size,
+            )
+        )
+
+    # Most recent first
+    entries.sort(key=lambda e: e.modified_at, reverse=True)
+    return entries
+
+
+def resume_session(session_id: str, base_dir: Path | None = None) -> Iterator[Event]:
+    return iter_events(session_path(session_id, base_dir))
+
+
+def delete_session(session_id: str, base_dir: Path | None = None) -> None:
+    path = session_path(session_id, base_dir)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+__all__ = [
+    "Role",
+    "Event",
+    "JsonlEventWriter",
+    "iter_events",
+    "generate_session_id",
+    "SESSIONS_DIR",
+    "session_path",
+    "SessionInfo",
+    "list_sessions",
+    "resume_session",
+    "delete_session",
+]
