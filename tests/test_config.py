@@ -136,6 +136,40 @@ approval_policy = "on-request"
     assert settings.api_key == "env_key"
 
 
+def test_precedence_applies_across_all_fields(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[auth]
+api_key = "config_key"
+
+[model]
+id = "config-model"
+reasoning_effort = "low"
+
+[runtime]
+fs_mode = "unrestricted"
+approval_policy = "never"
+
+[logging]
+log_level = "debug"
+"""
+    )
+
+    env = {"OPENAI_API_KEY": "env_key", "LOG_LEVEL": "info"}
+    cli = {"model": "cli-model", "fs_mode": "restricted", "log_level": "warning"}
+
+    settings = load_settings(config_path=config_path, env=env, cli_overrides=cli)
+
+    assert settings.api_key == "env_key"
+    assert settings.model == "cli-model"
+    assert settings.reasoning_effort is ReasoningEffort.LOW
+    assert settings.fs_mode is FsMode.RESTRICTED
+    assert settings.approval_policy is ApprovalPolicy.NEVER
+    assert settings.log_level is LogLevel.WARNING
+
+
 def test_create_if_missing_sets_permissions(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
 

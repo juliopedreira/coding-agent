@@ -82,6 +82,26 @@ def test_iter_events_raises_on_invalid_line(tmp_path: Path) -> None:
         list(iter_events(path))
 
 
+def test_event_schema_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        Event(
+            timestamp=datetime(2025, 1, 2, 3, 4, 5, tzinfo=UTC),
+            event_type="message",
+            id=UUID("12345678-1234-5678-1234-567812345678"),
+            role=Role.USER,
+            content="hi",
+            metadata={},
+            error=None,
+            tool_name=None,
+            extra_field="oops",  # type: ignore[arg-type]
+        )
+
+
+def test_event_schema_requires_fields() -> None:
+    with pytest.raises(ValidationError):
+        Event.model_validate({"event_type": "message", "content": "hi"})
+
+
 def test_session_list_resume_delete(tmp_path: Path) -> None:
     base_dir = tmp_path / "sessions"
     base_dir.mkdir(parents=True, exist_ok=True)
