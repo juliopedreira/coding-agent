@@ -73,3 +73,27 @@ async def test_mock_transport_errors() -> None:
     with pytest.raises(httpx.HTTPStatusError):
         async for _ in transport.stream_response({}):
             pass
+
+
+@pytest.mark.asyncio
+async def test_logging_hook_records_status_and_request_id() -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = 'data: {"delta":"hi"}\n\ndata: [DONE]\n'
+        return httpx.Response(200, text=body, headers={"x-request-id": "req-123"}, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpResponsesTransport(api_key="abc", client=client, logger=lambda e, d: events.append((e, d)))
+
+    async for _ in transport.stream_response({"hello": "world"}):
+        pass
+
+    await transport.aclose()
+    await client.aclose()
+
+    assert events and events[0][0] == "response_complete"
+    data = events[0][1]
+    assert data["status"] == 200
+    assert data["request_id"] == "req-123"
+    assert data["base_url"] == "https://api.openai.com/v1"

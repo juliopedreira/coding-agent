@@ -207,7 +207,7 @@ async def consume_stream(source: AsyncIterator[ResponseEvent], *, queue_max: int
     finally:
         stop_event.set()
         producer_task.cancel()
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception, asyncio.CancelledError):
             await producer_task
 
 
