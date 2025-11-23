@@ -14,6 +14,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lincona.paths import get_lincona_home
+
 
 class Role(str, Enum):
     USER = "user"
@@ -52,16 +54,29 @@ def generate_session_id(now: datetime | None = None) -> str:
 class JsonlEventWriter:
     """Append-only JSONL writer for session events."""
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, fsync_every: int | None = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("a", encoding="utf-8")
         self._closed = False
+        self._fsync_every = fsync_every
+        self._since_fsync = 0
 
     def append(self, event: Event) -> None:
         line = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
         self._file.write(line + "\n")
         self._file.flush()
+        if self._fsync_every is not None:
+            self._since_fsync += 1
+            if self._since_fsync >= self._fsync_every:
+                os.fsync(self._file.fileno())
+                self._since_fsync = 0
+
+    def sync(self) -> None:
+        """Force flush and fsync regardless of fsync_every settings."""
+
+        self._file.flush()
+        os.fsync(self._file.fileno())
 
     def close(self) -> None:
         if self._closed:
@@ -97,11 +112,8 @@ def iter_events(path: Path | str) -> Iterator[Event]:
         yield Event.model_validate_json(stripped)
 
 
-SESSIONS_DIR = Path.home() / ".lincona" / "sessions"
-
-
 def session_path(session_id: str, base_dir: Path | None = None) -> Path:
-    directory = base_dir or SESSIONS_DIR
+    directory = base_dir or (get_lincona_home() / "sessions")
     return directory / f"{session_id}.jsonl"
 
 
@@ -115,7 +127,7 @@ class SessionInfo(BaseModel):
 
 
 def list_sessions(base_dir: Path | None = None) -> list[SessionInfo]:
-    directory = base_dir or SESSIONS_DIR
+    directory = base_dir or (get_lincona_home() / "sessions")
     if not directory.exists():
         return []
 
@@ -155,7 +167,6 @@ __all__ = [
     "JsonlEventWriter",
     "iter_events",
     "generate_session_id",
-    "SESSIONS_DIR",
     "session_path",
     "SessionInfo",
     "list_sessions",

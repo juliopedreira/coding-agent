@@ -90,3 +90,17 @@ def test_signal_handler_triggers_run(monkeypatch: pytest.MonkeyPatch):
     mgr._handle_signal(2, None)
 
     assert flag.count == 1
+
+
+def test_register_resources_combines(tmp_path: Path):
+    writer = _sample_writer(tmp_path)
+    logger = logging.getLogger("test.shutdown.resources")
+    handler = logging.FileHandler(tmp_path / "log.log")
+    logger.addHandler(handler)
+
+    mgr = ShutdownManager(install_hooks=False)
+    mgr.register_resources(writers=[writer], loggers=[logger])
+    mgr.run()
+
+    assert writer._closed is True  # type: ignore[attr-defined]
+    assert logger.handlers == []

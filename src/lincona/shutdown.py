@@ -9,7 +9,7 @@ from __future__ import annotations
 import atexit
 import logging
 import signal
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from lincona.sessions import JsonlEventWriter
@@ -21,9 +21,13 @@ class ShutdownManager:
     def __init__(self, *, install_hooks: bool = True) -> None:
         self._callbacks: list[Callable[[], None]] = []
         self._ran = False
+        self._logger = logging.getLogger("lincona.shutdown")
+        self._old_handlers: dict[int, Any] = {}
+        self._restored = False
         if install_hooks:
-            signal.signal(signal.SIGINT, self._handle_signal)
-            signal.signal(signal.SIGTERM, self._handle_signal)
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                self._old_handlers[sig] = signal.getsignal(sig)
+                signal.signal(sig, self._handle_signal)
             atexit.register(self.run)
 
     def register(self, callback: Callable[[], None]) -> None:
@@ -49,6 +53,19 @@ class ShutdownManager:
 
         self.register(_close_handlers)
 
+    def register_resources(
+        self,
+        *,
+        writers: Iterable[JsonlEventWriter] | None = None,
+        loggers: Iterable[logging.Logger] | None = None,
+    ) -> None:
+        if writers:
+            for writer in writers:
+                self.register_event_writer(writer)
+        if loggers:
+            for logger in loggers:
+                self.register_logger(logger)
+
     def run(self) -> None:
         """Execute registered callbacks once (latest registered first)."""
 
@@ -60,12 +77,19 @@ class ShutdownManager:
             try:
                 callback()
             except Exception:
-                # Swallow errors to allow remaining callbacks to run; logging can
-                # be added later once a global logger exists.
+                self._logger.exception("Shutdown callback failed")
                 continue
+        self._restore_signal_handlers()
 
     def _handle_signal(self, signum: int, frame: Any) -> None:  # pragma: no cover - thin wrapper
         self.run()
+
+    def _restore_signal_handlers(self) -> None:
+        if self._restored:
+            return
+        for sig, handler in self._old_handlers.items():
+            signal.signal(sig, handler)
+        self._restored = True
 
 
 # Default global manager used by the application

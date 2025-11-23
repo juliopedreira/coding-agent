@@ -8,16 +8,17 @@ handlers across repeated initializations.
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 
 from lincona.config import LogLevel
+from lincona.paths import get_lincona_home
 
-LOGS_DIR = Path.home() / ".lincona" / "logs"
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 def session_log_path(session_id: str, base_dir: Path | None = None) -> Path:
-    directory = base_dir or LOGS_DIR
+    directory = base_dir or (get_lincona_home() / "logs")
     return directory / f"{session_id}.log"
 
 
@@ -26,7 +27,7 @@ def configure_session_logger(
     *,
     log_level: LogLevel | str = LogLevel.WARNING,
     base_dir: Path | None = None,
-    max_bytes: int = DEFAULT_MAX_BYTES,
+    max_bytes: int | None = DEFAULT_MAX_BYTES,
 ) -> logging.Logger:
     """Configure and return a file logger scoped to a session.
 
@@ -55,12 +56,16 @@ def configure_session_logger(
     return logger
 
 
-def _truncate_if_oversize(path: Path, max_bytes: int) -> None:
+def _truncate_if_oversize(path: Path, max_bytes: int | None) -> None:
+    if max_bytes is None or max_bytes <= 0:
+        return
     if not path.exists():
         return
-    if path.stat().st_size <= max_bytes:
+    size = path.stat().st_size
+    if size <= max_bytes:
         return
-    path.write_text("", encoding="utf-8")
+    data = path.read_bytes()
+    path.write_bytes(data[-max_bytes:])
 
 
 def _to_logging_level(value: LogLevel | str) -> int:
@@ -76,6 +81,11 @@ def _to_logging_level(value: LogLevel | str) -> int:
         try:
             return mapping[LogLevel(value)]
         except ValueError:
+            warnings.warn(
+                f"Unknown log level '{value}', defaulting to WARNING",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             return logging.WARNING
     return logging.WARNING
 
@@ -83,6 +93,5 @@ def _to_logging_level(value: LogLevel | str) -> int:
 __all__ = [
     "configure_session_logger",
     "session_log_path",
-    "LOGS_DIR",
     "DEFAULT_MAX_BYTES",
 ]

@@ -133,3 +133,12 @@ def test_session_list_resume_delete(tmp_path: Path) -> None:
 
     # Deleting again should be silent
     delete_session(session_id, base_dir)
+
+
+def test_session_paths_respect_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+
+    session_id = "202501020304-abc"
+    expected = tmp_path / "sessions" / f"{session_id}.jsonl"
+
+    assert session_path(session_id) == expected
