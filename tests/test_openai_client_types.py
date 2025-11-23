@@ -78,6 +78,10 @@ def test_conversation_request_validation() -> None:
     assert request.model == "gpt-4.1"
     assert isinstance(request.tools[1], ApplyPatchFreeform)
 
+    # Allow model=None to defer to client defaults
+    request_none = ConversationRequest(messages=[msg], model=None)
+    assert request_none.model is None
+
 
 def test_delta_and_tool_call_payload_validation() -> None:
     with pytest.raises(ValueError):

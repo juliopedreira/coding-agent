@@ -148,3 +148,29 @@ def test_status_error_mapping_function() -> None:
     resp_404 = httpx.Response(404, request=request)
     err = httpx.HTTPStatusError("client", request=request, response=resp_404)
     assert isinstance(_map_status_error(err), ApiClientError)
+
+
+@pytest.mark.asyncio
+async def test_defaults_applied_when_missing() -> None:
+    transport = CapturingTransport(chunks=["data: [DONE]\n"])
+    client = OpenAIResponsesClient(
+        transport,
+        default_model="gpt-4.1-mini",
+        default_reasoning_effort="medium",
+        default_timeout=5.0,
+    )
+
+    request = ConversationRequest(
+        messages=[Message(role=MessageRole.USER, content="hi")],
+        model=None,  # use default model from client
+        reasoning_effort=None,
+        timeout=None,
+    )
+
+    await anext(client.submit(request))
+
+    payload = transport.last_payload
+    assert payload is not None
+    assert payload["model"] == "gpt-4.1-mini"
+    assert payload["reasoning"] == {"effort": "medium"}
+    assert payload["timeout"] == 5.0

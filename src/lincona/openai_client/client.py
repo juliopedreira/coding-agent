@@ -34,9 +34,15 @@ class OpenAIResponsesClient:
         transport: ResponsesTransport,
         *,
         max_tool_buffer_bytes: int = DEFAULT_MAX_TOOL_BUFFER_BYTES,
+        default_model: str | None = None,
+        default_reasoning_effort: str | None = None,
+        default_timeout: float | None = None,
     ) -> None:
         self._transport = transport
         self._max_tool_buffer_bytes = max_tool_buffer_bytes
+        self._default_model = default_model
+        self._default_reasoning_effort = default_reasoning_effort
+        self._default_timeout = default_timeout
 
     async def submit(self, request: ConversationRequest) -> AsyncIterator[ResponseEvent]:
         """Submit a conversation request and yield parsed streaming events."""
@@ -66,11 +72,15 @@ class OpenAIResponsesClient:
             raise ApiError("unexpected error") from exc
 
     def _build_payload(self, request: ConversationRequest) -> dict[str, Any]:
+        model = request.model or self._default_model
+        if not model:
+            raise ApiClientError("model is required")
+
         messages = [_message_to_dict(msg) for msg in request.messages]
         tools = [_tool_to_dict(tool) for tool in request.tools]
 
         payload: dict[str, Any] = {
-            "model": request.model,
+            "model": model,
             "messages": messages,
             "stream": True,
         }
@@ -78,8 +88,10 @@ class OpenAIResponsesClient:
         if tools:
             payload["tools"] = tools
 
-        if request.reasoning_effort is not None:
-            payload["reasoning"] = {"effort": request.reasoning_effort.value}
+        reasoning_effort = request.reasoning_effort or self._default_reasoning_effort
+        if reasoning_effort is not None:
+            effort_value = reasoning_effort.value if hasattr(reasoning_effort, "value") else reasoning_effort
+            payload["reasoning"] = {"effort": effort_value}
 
         if request.max_output_tokens is not None:
             payload["max_output_tokens"] = request.max_output_tokens
@@ -87,8 +99,9 @@ class OpenAIResponsesClient:
         if request.metadata:
             payload["metadata"] = dict(request.metadata)
 
-        if request.timeout is not None:
-            payload["timeout"] = request.timeout
+        timeout = request.timeout if request.timeout is not None else self._default_timeout
+        if timeout is not None:
+            payload["timeout"] = timeout
 
         return payload
 

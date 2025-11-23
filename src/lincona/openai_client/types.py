@@ -65,7 +65,7 @@ class ConversationRequest:
     """Structured request used by the OpenAIResponsesClient."""
 
     messages: Sequence[Message]
-    model: str
+    model: str | None
     reasoning_effort: ReasoningEffort | None = None
     tools: Sequence[ToolSpecification] = field(default_factory=tuple)
     max_output_tokens: int | None = None
@@ -73,8 +73,8 @@ class ConversationRequest:
     timeout: float | None = None
 
     def __post_init__(self) -> None:
-        if not self.model.strip():
-            raise ValueError("model cannot be empty")
+        if isinstance(self.model, str) and not self.model.strip():
+            raise ValueError("model cannot be empty string")
         if not self.messages:
             raise ValueError("messages cannot be empty")
         if self.max_output_tokens is not None and self.max_output_tokens <= 0:
