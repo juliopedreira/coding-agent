@@ -1,0 +1,18 @@
+[build-system]
+requires = ["poetry-core>=1.8.1"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "lincona"
+version = "0.1.0"
+description = "Linux-only interactive coding agent CLI"
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = []
+
+[project.scripts]
+lincona = "lincona.cli:main"
+
+[tool.poetry]
+# Keep package include layout for Poetry's build backend
+packages = [{ include = "lincona", from = "src" }]
