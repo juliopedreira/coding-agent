@@ -1,6 +1,6 @@
 # Lincona
 
-Linux-only interactive coding agent CLI.  
+Linux-only interactive coding agent CLI.
 
 Project skeleton initialized with Poetry (`python ^3.11`) and console script entrypoint `lincona`.
 

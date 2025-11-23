@@ -64,21 +64,21 @@ Reimplementation Notes
 - Output formatting uses structured formatter from `tools/mod.rs` (structured unless freeform path set elsewhere); replicate truncation rules.
 
 ## Input/Output Examples
-- **Start PTY session success**  
-  Payload (`exec_command`): `{"cmd":"python -i","cwd":"/repo"}`  
+- **Start PTY session success**
+  Payload (`exec_command`): `{"cmd":"python -i","cwd":"/repo"}`
   Output: ToolOutput content with exec formatter showing exit code 0 (or session info); `success: Some(true)` if process exits cleanly.
 
-- **Start PTY denied by sandbox**  
+- **Start PTY denied by sandbox**
   Same payload under restrictive sandbox; runtime returns SandboxErr::Denied → RespondToModel with formatted denial output (exit code -1), no success flag.
 
-- **Start PTY with escalation request**  
+- **Start PTY with escalation request**
   Payload includes `"with_escalated_permissions":true,"justification":"needs sudo"`; first attempt unsandboxed; otherwise same outputs as above.
 
-- **write_stdin success**  
-  Payload (`write_stdin`): `{"session_id":1,"chars":"print(1)\\n","yield_time_ms":200}`  
+- **write_stdin success**
+  Payload (`write_stdin`): `{"session_id":1,"chars":"print(1)\\n","yield_time_ms":200}`
   Output: ToolOutput content = latest PTY output chunk; success Some(true).
 
-- **write_stdin invalid session**  
+- **write_stdin invalid session**
   Payload with unknown session_id → RespondToModel with manager error string (e.g., \"session not found\"), no success flag.
 
 ## Gotchas

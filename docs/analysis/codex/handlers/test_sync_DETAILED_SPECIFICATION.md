@@ -60,21 +60,21 @@ Reimplementation Notes
 - This handler is not exposed to end users; fidelity matters for tests.
 
 ## Input/Output Examples
-- **Simple sleep only**  
-  Payload: `{"sleep_before_ms":50,"sleep_after_ms":25}`  
+- **Simple sleep only**
+  Payload: `{"sleep_before_ms":50,"sleep_after_ms":25}`
   Output: `"ok"`, success true after sleeps elapse.
 
-- **Barrier with two participants**  
-  Caller A payload: `{"barrier":{"id":"b1","participants":2,"timeout_ms":1000}}`  
+- **Barrier with two participants**
+  Caller A payload: `{"barrier":{"id":"b1","participants":2,"timeout_ms":1000}}`
   Caller B payload: same as A. Both block until both arrive, then return `"ok"`, success true. Barrier is cleaned up by leader.
 
-- **Barrier participant mismatch**  
+- **Barrier participant mismatch**
   First call registers `participants:2`; second call uses `participants:3` → second call RespondToModel(\"barrier b1 already registered with 2 participants\").
 
-- **Barrier timeout**  
+- **Barrier timeout**
   Single caller payload: `{"barrier":{"id":"solo","participants":2,"timeout_ms":100}}` with no other participants → RespondToModel(\"test_sync_tool barrier wait timed out\").
 
-- **Invalid params**  
+- **Invalid params**
   Payload: `{"barrier":{"id":"bad","participants":0}}` → RespondToModel("barrier participants must be greater than zero").
 
 ## Gotchas

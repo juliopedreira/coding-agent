@@ -40,20 +40,20 @@ Reimplementation Notes
 - Maintain event emission so clients can react (e.g., UI preview).
 
 ## Input/Output Examples
-- **Valid image attach**  
-  Payload: `{"path":"./assets/diagram.png"}` (resolved to `/repo/assets/diagram.png`, file exists)  
+- **Valid image attach**
+  Payload: `{"path":"./assets/diagram.png"}` (resolved to `/repo/assets/diagram.png`, file exists)
   Output: ToolOutput content `\"attached local image path\"`, success true; emits ViewImageToolCall event and injects LocalImage input.
 
-- **Path not found**  
-  Payload: `{"path":"/repo/missing.png"}`  
+- **Path not found**
+  Payload: `{"path":"/repo/missing.png"}`
   Output: RespondToModel(\"unable to locate image at `/repo/missing.png`: <io error>\").
 
-- **Path is directory**  
-  Payload: `{"path":"/repo/assets"}` where assets is dir  
+- **Path is directory**
+  Payload: `{"path":"/repo/assets"}` where assets is dir
   Output: RespondToModel(\"image path `/repo/assets` is not a file\").
 
-- **No active task**  
-  If `session.inject_input` fails (e.g., no active turn), payload otherwise valid  
+- **No active task**
+  If `session.inject_input` fails (e.g., no active turn), payload otherwise valid
   Output: RespondToModel("unable to attach image (no active task)").
 
 ## Gotchas

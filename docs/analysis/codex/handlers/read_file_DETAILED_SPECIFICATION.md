@@ -65,24 +65,24 @@ Reimplementation Notes
 - All errors should be user-facing via RespondToModel; do not throw fatal errors from this handler.
 
 ## Input/Output Examples
-- **Slice basic**  
-  Payload: `{"file_path":"/repo/src/lib.rs","offset":10,"limit":5,"mode":"slice"}`  
+- **Slice basic**
+  Payload: `{"file_path":"/repo/src/lib.rs","offset":10,"limit":5,"mode":"slice"}`
   Output: 5 numbered lines starting at 10; success true.
 
-- **Slice offset past EOF**  
-  Payload: `{"file_path":"/repo/src/empty.rs","offset":999,"limit":10}`  
+- **Slice offset past EOF**
+  Payload: `{"file_path":"/repo/src/empty.rs","offset":999,"limit":10}`
   Output: empty content string; success true.
 
-- **Indentation block with header/siblings**  
-  Payload: `{"file_path":"/repo/app.py","offset":42,"limit":50,"mode":"indentation","indentation":{"anchor_line":42,"max_levels":1,"include_siblings":true,"include_header":true}}`  
+- **Indentation block with header/siblings**
+  Payload: `{"file_path":"/repo/app.py","offset":42,"limit":50,"mode":"indentation","indentation":{"anchor_line":42,"max_levels":1,"include_siblings":true,"include_header":true}}`
   Output: formatted block covering the anchor’s indentation level and siblings; success true.
 
-- **Invalid path (relative)**  
-  Payload: `{"file_path":"relative.txt"}`  
+- **Invalid path (relative)**
+  Payload: `{"file_path":"relative.txt"}`
   Output: RespondToModel(\"file_path must be an absolute path\").
 
-- **Zero limit**  
-  Payload: `{"file_path":"/repo/a.txt","limit":0}`  
+- **Zero limit**
+  Payload: `{"file_path":"/repo/a.txt","limit":0}`
   Output: RespondToModel("limit must be greater than zero").
 
 ## Gotchas

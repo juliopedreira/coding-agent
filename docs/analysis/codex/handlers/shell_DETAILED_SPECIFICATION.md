@@ -77,28 +77,28 @@ Reimplementation Notes
 - Keep telemetry/log payload truncation unchanged (handled in context/format helpers).
 
 ## Input/Output Examples
-- **shell success (array args)**  
-  Payload: `{"command":["echo","hi"],"workdir":"/repo","timeout_ms":5000}`  
+- **shell success (array args)**
+  Payload: `{"command":["echo","hi"],"workdir":"/repo","timeout_ms":5000}`
   Output: ToolOutput content contains `Exit code: 0` and `hi`; `success: Some(true)`.
 
-- **shell non-zero exit**  
-  Payload: `{"command":["false"],"workdir":"/repo"}`  
+- **shell non-zero exit**
+  Payload: `{"command":["false"],"workdir":"/repo"}`
   Output: `FunctionCallError::RespondToModel` with formatted exec output (exit code 1, stderr), no success flag.
 
-- **shell_command success (string)**  
-  Payload: `{"command":"ls -1","workdir":"/repo"}`  
+- **shell_command success (string)**
+  Payload: `{"command":"ls -1","workdir":"/repo"}`
   Output: ToolOutput freeform formatted listing; `success: Some(true)`.
 
-- **Escalation rejected by policy**  
-  Approval policy ≠ OnRequest, payload `{..., "with_escalated_permissions":true, "justification":"needs net"}`  
+- **Escalation rejected by policy**
+  Approval policy ≠ OnRequest, payload `{..., "with_escalated_permissions":true, "justification":"needs net"}`
   Output: RespondToModel `"approval policy is ... reject command — you should not ask for escalated permissions if the approval policy is ..."`; no execution.
 
-- **Inline apply_patch fast path**  
-  Payload command array encodes apply_patch grammar.  
+- **Inline apply_patch fast path**
+  Payload command array encodes apply_patch grammar.
   Output: ToolOutput from apply_patch handler (success true) and emits patch events; no shell exec output.
 
-- **Local shell call**  
-  Payload: `ToolPayload::LocalShell { params: ShellToolCallParams{command:["echo","local"], workdir:"/repo"} }`  
+- **Local shell call**
+  Payload: `ToolPayload::LocalShell { params: ShellToolCallParams{command:["echo","local"], workdir:"/repo"} }`
   Output: same formatting as shell array path; success true.
 
 ## Gotchas

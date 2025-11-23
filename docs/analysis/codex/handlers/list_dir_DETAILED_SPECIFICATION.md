@@ -57,9 +57,9 @@ Reimplementation Notes
 - Use UTF-8 safe truncation for names longer than 500 bytes.
 
 ## Input/Output Examples
-- **Basic list depth 2**  
-  Payload: `{"dir_path":"/repo","offset":1,"limit":10,"depth":2}`  
-  Output (example):  
+- **Basic list depth 2**
+  Payload: `{"dir_path":"/repo","offset":1,"limit":10,"depth":2}`
+  Output (example):
   ```
   Absolute path: /repo
   nested/
@@ -68,20 +68,20 @@ Reimplementation Notes
   ```
   success true.
 
-- **Paging with truncation notice**  
-  Payload: `{"dir_path":"/repo","offset":1,"limit":3,"depth":3}` when >3 entries exist  
+- **Paging with truncation notice**
+  Payload: `{"dir_path":"/repo","offset":1,"limit":3,"depth":3}` when >3 entries exist
   Output ends with `More than 3 entries found`; success true.
 
-- **Offset beyond entries**  
-  Payload: `{"dir_path":"/repo","offset":999,"limit":5,"depth":1}`  
+- **Offset beyond entries**
+  Payload: `{"dir_path":"/repo","offset":999,"limit":5,"depth":1}`
   Output: RespondToModel(\"offset exceeds directory entry count\").
 
-- **Non-absolute path**  
-  Payload: `{"dir_path":"./relative"}`  
+- **Non-absolute path**
+  Payload: `{"dir_path":"./relative"}`
   Output: RespondToModel(\"dir_path must be an absolute path\").
 
-- **Depth=0 rejection**  
-  Payload: `{"dir_path":"/repo","depth":0}`  
+- **Depth=0 rejection**
+  Payload: `{"dir_path":"/repo","depth":0}`
   Output: RespondToModel("depth must be greater than zero").
 
 ## Gotchas

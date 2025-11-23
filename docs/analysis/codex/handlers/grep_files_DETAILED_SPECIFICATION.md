@@ -63,31 +63,31 @@ Dependencies
 - Uses tokio async process + timeout; no sandbox logic inside handler (handled upstream in shell tools when executed).
 
 ## Input/Output Examples
-- **Match with default limit**  
-  Payload: `{"pattern":"TODO","path":"/repo"}`  
+- **Match with default limit**
+  Payload: `{"pattern":"TODO","path":"/repo"}`
   Output: newline-separated file paths containing TODO, up to 100 entries; success true.
 
-- **No matches**  
-  Payload: `{"pattern":"ZZZ_NOT_FOUND","path":"/repo"}`  
+- **No matches**
+  Payload: `{"pattern":"ZZZ_NOT_FOUND","path":"/repo"}`
   Output: `content="No matches found."`, `success: Some(false)`.
 
-- **Glob filtered**  
-  Payload: `{"pattern":"alpha","path":"/repo","include":"*.rs","limit":5}`  
+- **Glob filtered**
+  Payload: `{"pattern":"alpha","path":"/repo","include":"*.rs","limit":5}`
   Output: Only `.rs` files listed, max 5; success true.
 
-- **Limit capped**  
-  Payload: `{"pattern":"foo","limit":5000}`  
+- **Limit capped**
+  Payload: `{"pattern":"foo","limit":5000}`
   Output: at most 2000 paths (cap applied); success true.
 
-- **Path missing**  
-  Payload: `{"pattern":"foo","path":"/missing"}`  
+- **Path missing**
+  Payload: `{"pattern":"foo","path":"/missing"}`
   Output: RespondToModel(\"unable to access `/missing`: <error>\").
 
-- **Empty pattern**  
-  Payload: `{"pattern":"   "}`  
+- **Empty pattern**
+  Payload: `{"pattern":"   "}`
   Output: RespondToModel(\"pattern must not be empty\").
 
-- **rg timeout**  
+- **rg timeout**
   Large search causing >30s execution → RespondToModel("rg timed out after 30 seconds").
 
 ## Gotchas

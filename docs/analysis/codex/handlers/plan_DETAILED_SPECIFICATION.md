@@ -41,15 +41,15 @@ Reimplementation Notes
 - Keep success string stable for clients/tests.
 
 ## Input/Output Examples
-- **Valid plan update**  
-  Payload: `{"explanation":"Roadmap","plan":[{"step":"Set up project","status":"completed"},{"step":"Implement feature","status":"in_progress"}]}`  
+- **Valid plan update**
+  Payload: `{"explanation":"Roadmap","plan":[{"step":"Set up project","status":"completed"},{"step":"Implement feature","status":"in_progress"}]}`
   Output: ToolOutput content `\"Plan updated\"`, success true; PlanUpdate event emitted.
 
-- **Missing required field**  
-  Payload: `{"explanation":"Oops"}` (no plan array)  
+- **Missing required field**
+  Payload: `{"explanation":"Oops"}` (no plan array)
   Output: RespondToModel(\"failed to parse function arguments: ...\"), no event.
 
-- **Invalid status value**  
+- **Invalid status value**
   Payload includes `status:"done"` → JSON parse may succeed but model should adhere; if serde rejects, RespondToModel parse error.
 
 ## Gotchas

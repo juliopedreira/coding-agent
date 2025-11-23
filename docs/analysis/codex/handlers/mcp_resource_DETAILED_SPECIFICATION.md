@@ -67,27 +67,27 @@ Reimplementation Notes
 - Maintain begin/end event emission with duration and error strings; success flag influences `is_error`.
 
 ## Input/Output Examples
-- **List resources for specific server**  
-  Payload: `{"server":"figma","cursor":null}`  
+- **List resources for specific server**
+  Payload: `{"server":"figma","cursor":null}`
   Output: JSON string `{"server":"figma","resources":[...],"nextCursor":null}` wrapped in ToolOutput success true; begin/end events emitted.
 
-- **List resources all servers**  
-  Payload: `{}` (empty or whitespace)  
+- **List resources all servers**
+  Payload: `{}` (empty or whitespace)
   Output: JSON string with `server:null` and merged `resources` sorted by server name; success true.
 
-- **List resources with cursor but no server**  
-  Payload: `{"cursor":"abc"}`  
+- **List resources with cursor but no server**
+  Payload: `{"cursor":"abc"}`
   Output: RespondToModel(\"cursor can only be used when a server is specified\").
 
-- **Read resource success**  
-  Payload: `{"server":"figma","uri":"memo://123"}`  
+- **Read resource success**
+  Payload: `{"server":"figma","uri":"memo://123"}`
   Output: JSON string containing server, uri, and read result; success true.
 
-- **Read resource missing required field**  
-  Payload: `{"uri":"memo://123"}`  
+- **Read resource missing required field**
+  Payload: `{"uri":"memo://123"}`
   Output: RespondToModel(\"server must be provided\").
 
-- **MCP backend error**  
+- **MCP backend error**
   If Session::read_resource returns error, output RespondToModel("resources/read failed: <err>"); end event includes error string.
 
 ## Gotchas

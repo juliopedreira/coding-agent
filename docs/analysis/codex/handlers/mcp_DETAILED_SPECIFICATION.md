@@ -40,20 +40,20 @@ Reimplementation Notes
 - No sandbox/approval logic here; execution occurs inside MCP server.
 
 ## Input/Output Examples
-- **Standard MCP tool call success**  
-  Payload: `ToolPayload::Mcp { server: "figma".into(), tool: "list_files".into(), raw_arguments: "{\"project\":\"123\"}".into() }`  
+- **Standard MCP tool call success**
+  Payload: `ToolPayload::Mcp { server: "figma".into(), tool: "list_files".into(), raw_arguments: "{\"project\":\"123\"}".into() }`
   Downstream returns `McpToolCallOutput { result: Ok(CallToolResult{...}) }` → ToolOutput::Mcp with same result; success determined by `is_error` inside CallToolResult.
 
-- **MCP tool returns function output**  
+- **MCP tool returns function output**
   Downstream responds with `ResponseInputItem::FunctionCallOutput{ output: { content:\"ok\", content_items:None, success:Some(true) }}` → ToolOutput::Function mirrored.
 
-- **Unsupported payload**  
+- **Unsupported payload**
   Payload is Function/Custom/etc. → RespondToModel(\"mcp handler received unsupported payload\").
 
-- **Unexpected variant**  
+- **Unexpected variant**
   If `handle_mcp_tool_call` returns other ResponseInputItem → RespondToModel(\"mcp handler received unexpected response variant\").
 
-- **Downstream MCP error**  
+- **Downstream MCP error**
   `result: Err("timeout")` → ToolOutput::Mcp with Err("timeout"); model sees error via MCP result fields.
 
 ## Gotchas

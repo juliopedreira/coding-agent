@@ -75,24 +75,24 @@ Reimplementation Notes
 - Ensure truncation/formatting handled by emitter/runtime (not handler) for consistency.
 
 ## Input/Output Examples
-- **Freeform patch, verified, inline apply succeeds**  
-  Input payload (Function): `{"input":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-foo\n+bar\n*** End Patch\n"}`  
+- **Freeform patch, verified, inline apply succeeds**
+  Input payload (Function): `{"input":"*** Begin Patch\n*** Update File: foo.txt\n@@\n-foo\n+bar\n*** End Patch\n"}`
   Output: `ToolOutput::Function` with `content` = apply_patch success text (from `apply_patch::apply_patch`), `success: Some(true)`.
 
-- **Freeform patch, verification fails**  
-  Input payload: malformed grammar (e.g., missing header).  
+- **Freeform patch, verification fails**
+  Input payload: malformed grammar (e.g., missing header).
   Output: `FunctionCallError::RespondToModel("apply_patch verification failed: <reason>")`.
 
-- **Custom payload delegated to exec**  
-  Input payload (Custom): same patch text; `codex_apply_patch` returns `DelegateToExec`.  
+- **Custom payload delegated to exec**
+  Input payload (Custom): same patch text; `codex_apply_patch` returns `DelegateToExec`.
   Output: `ToolOutput::Function` with content from `ApplyPatchRuntime` (formatted exec output); success true if exit code 0, otherwise RespondToModel with stderr.
 
-- **Shell parse error**  
-  Input payload containing tricky shell quoting that fails verification.  
+- **Shell parse error**
+  Input payload containing tricky shell quoting that fails verification.
   Output: `FunctionCallError::RespondToModel("apply_patch handler received invalid patch input")`.
 
-- **Non-apply_patch text**  
-  Input payload: `{"input":"echo hi"}`  
+- **Non-apply_patch text**
+  Input payload: `{"input":"echo hi"}`
   Output: `FunctionCallError::RespondToModel("apply_patch handler received non-apply_patch input")`.
 
 ## Gotchas
