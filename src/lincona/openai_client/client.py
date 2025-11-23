@@ -18,6 +18,7 @@ from lincona.openai_client.types import (
     ApiTimeoutError,
     ApplyPatchFreeform,
     ConversationRequest,
+    ErrorEvent,
     Message,
     ResponseEvent,
     StreamingParseError,
@@ -59,17 +60,23 @@ class OpenAIResponsesClient:
             async for event in parse_stream(stream, max_tool_buffer_bytes=self._max_tool_buffer_bytes):
                 yield event
         except httpx.TimeoutException as exc:
-            raise ApiTimeoutError("request timed out") from exc
+            err: ApiError = ApiTimeoutError("request timed out")
+            err.__cause__ = exc
+            yield ErrorEvent(error=err)
         except httpx.HTTPStatusError as exc:
-            raise _map_status_error(exc) from exc
+            yield ErrorEvent(error=_map_status_error(exc))
         except httpx.RequestError as exc:
-            raise ApiClientError("request failed") from exc
-        except StreamingParseError:
-            raise
-        except ApiError:
-            raise
+            err = ApiClientError("request failed")
+            err.__cause__ = exc
+            yield ErrorEvent(error=err)
+        except StreamingParseError as exc:
+            yield ErrorEvent(error=exc)
+        except ApiError as exc:
+            yield ErrorEvent(error=exc)
         except Exception as exc:  # pragma: no cover - defensive
-            raise ApiError("unexpected error") from exc
+            err = ApiError("unexpected error")
+            err.__cause__ = exc
+            yield ErrorEvent(error=err)
 
     def _build_payload(self, request: ConversationRequest) -> dict[str, Any]:
         model = request.model or self._default_model

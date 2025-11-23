@@ -16,6 +16,7 @@ from lincona.openai_client.types import (
     ApiTimeoutError,
     ApplyPatchFreeform,
     ConversationRequest,
+    ErrorEvent,
     Message,
     MessageRole,
     ToolDefinition,
@@ -92,21 +93,19 @@ async def test_http_errors_are_mapped() -> None:
     client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
 
-    with pytest.raises(ApiAuthError):
-        async for _ in client.submit(request):
-            pass
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0], ErrorEvent)
+    assert isinstance(events[0].error, ApiAuthError)
 
     transport = MockResponsesTransport([], status_code=429)
     client = OpenAIResponsesClient(transport)
-    with pytest.raises(ApiRateLimitError):
-        async for _ in client.submit(request):
-            pass
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0].error, ApiRateLimitError)
 
     transport = MockResponsesTransport([], status_code=500)
     client = OpenAIResponsesClient(transport)
-    with pytest.raises(ApiServerError):
-        async for _ in client.submit(request):
-            pass
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0].error, ApiServerError)
 
 
 @pytest.mark.asyncio
@@ -118,18 +117,17 @@ async def test_timeout_and_request_error_mapping() -> None:
     client = OpenAIResponsesClient(TimeoutTransport())
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
 
-    with pytest.raises(ApiTimeoutError):
-        async for _ in client.submit(request):
-            pass
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0], ErrorEvent)
+    assert isinstance(events[0].error, ApiTimeoutError)
 
     class RequestErrorTransport:
         async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
             raise httpx.RequestError("boom")
 
     client = OpenAIResponsesClient(RequestErrorTransport())
-    with pytest.raises(ApiClientError):
-        async for _ in client.submit(request):
-            pass
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0].error, ApiClientError)
 
 
 def test_status_error_mapping_function() -> None:
