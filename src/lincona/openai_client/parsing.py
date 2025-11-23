@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterable
-from typing import Any
+from typing import Any, cast
 
 from lincona.openai_client.types import (
     MessageDone,
@@ -156,4 +158,63 @@ async def parse_stream(
                 yield event
 
 
-__all__ = ["parse_stream", "DEFAULT_MAX_TOOL_BUFFER_BYTES"]
+async def consume_stream(source: AsyncIterator[ResponseEvent], *, queue_max: int = 128) -> AsyncIterator[ResponseEvent]:
+    """Consume a source iterator into a bounded queue to provide back-pressure.
+
+    The source is drained in a background task; the consumer pulls from a
+    bounded asyncio.Queue. If the consumer exits early, the producer task is
+    cancelled to avoid leaks.
+    """
+
+    queue: asyncio.Queue[ResponseEvent | BaseException | _Sentinel] = asyncio.Queue(maxsize=queue_max)
+    sentinel = _Sentinel()
+    stop_event = asyncio.Event()
+
+    async def _producer() -> None:
+        src = cast(AsyncIterator[Any], source)
+        try:
+            async for item in src:
+                await queue.put(item)
+                if stop_event.is_set():
+                    break
+        except asyncio.CancelledError:
+            return
+        except BaseException as exc:  # propagate to consumer
+            if not stop_event.is_set():
+                with contextlib.suppress(Exception):
+                    await queue.put(exc)
+        finally:
+            with contextlib.suppress(Exception):
+                aclose = getattr(src, "aclose", None)
+                if callable(aclose):
+                    await aclose()
+                if not stop_event.is_set():
+                    try:
+                        await queue.put(sentinel)
+                    except RuntimeError:
+                        return
+
+    producer_task = asyncio.create_task(_producer())
+
+    try:
+        while True:
+            item = await queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield cast(ResponseEvent, item)
+    finally:
+        stop_event.set()
+        producer_task.cancel()
+        with contextlib.suppress(Exception):
+            await producer_task
+
+
+class _Sentinel:
+    """Unique sentinel for queue termination."""
+
+    pass
+
+
+__all__ = ["parse_stream", "consume_stream", "DEFAULT_MAX_TOOL_BUFFER_BYTES"]
