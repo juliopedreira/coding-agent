@@ -22,7 +22,7 @@ Each epic is self-contained and executable by an engineer without other context.
 7. Expose helpers to list/resume/delete sessions for TUI and CLI `sessions` commands.
 8. Graceful shutdown writes pending session file and closes PTYs.
 
-## Epic 3: OpenAI Responses Client [ ] Done
+## Epic 3: OpenAI Responses Client [x] Done
 1. Implement client wrapper around OpenAI Responses API using httpx (async), supporting streaming deltas and tool call callbacks.
 2. Parameters: `model` (user-selectable), `reasoning_effort` (pass-through), `tools` advertisement (JSON + freeform apply_patch as two entries), `messages` with history.
 3. Provide interface to submit a turn, stream tokens and tool-call messages to the conversation manager.

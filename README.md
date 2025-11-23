@@ -54,6 +54,38 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 ## Architecture quick peek
 See `ARCHITECTURE.md` for a current overview of config loading, persistence, logging, and shutdown handling.
 
+## OpenAI Responses client (Epic 3)
+- Package: `lincona.openai_client`.
+- Typical usage:
+```python
+from lincona.config import load_settings
+from lincona.openai_client import (
+    HttpResponsesTransport,
+    OpenAIResponsesClient,
+    ConversationRequest,
+    Message,
+    MessageRole,
+)
+
+settings = load_settings()
+transport = HttpResponsesTransport(api_key=settings.api_key or "test-key")
+client = OpenAIResponsesClient(
+    transport,
+    default_model=settings.model,
+    default_reasoning_effort=settings.reasoning_effort.value,
+    default_timeout=60.0,
+)
+
+request = ConversationRequest(
+    messages=[Message(role=MessageRole.USER, content="Hello")],
+    model=None,  # falls back to default_model above
+)
+
+async for event in client.submit(request):
+    ...  # handle TextDelta/ToolCall*/MessageDone/ErrorEvent
+```
+- Swap `HttpResponsesTransport` with `MockResponsesTransport([...])` in tests to feed canned SSE chunks; parsing is handled by `parse_stream`.
+
 ## Maintenance tips
 - After changing dependencies, regenerate the lockfile: `make lock`
 - If the virtualenv breaks, remove `.venv/` and run `make install`
