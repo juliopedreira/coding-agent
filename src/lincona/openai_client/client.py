@@ -148,10 +148,14 @@ def _tool_to_dict(tool: ToolSpecification) -> dict[str, Any]:
 
 def _map_status_error(exc: httpx.HTTPStatusError) -> ApiError:
     status = exc.response.status_code
+    retry_after = exc.response.headers.get("retry-after")
+    retry_suffix = ""
+    if retry_after:
+        retry_suffix = f" (retry after {retry_after}s)"
     if status in (401, 403):
         return ApiAuthError(f"auth failed with status {status}")
     if status == 429:
-        return ApiRateLimitError("rate limited")
+        return ApiRateLimitError(f"rate limited{retry_suffix}")
     if status >= 500:
         return ApiServerError(f"server error {status}")
     return ApiClientError(f"request failed with status {status}")

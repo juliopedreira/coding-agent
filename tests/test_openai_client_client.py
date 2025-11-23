@@ -139,6 +139,11 @@ def test_status_error_mapping_function() -> None:
     resp_429 = httpx.Response(429, request=request)
     err = httpx.HTTPStatusError("rate", request=request, response=resp_429)
     assert isinstance(_map_status_error(err), ApiRateLimitError)
+    assert "retry" not in str(_map_status_error(err))
+
+    resp_429_retry = httpx.Response(429, headers={"Retry-After": "2"}, request=request)
+    err = httpx.HTTPStatusError("rate", request=request, response=resp_429_retry)
+    assert "retry after 2" in str(_map_status_error(err))
 
     resp_500 = httpx.Response(500, request=request)
     err = httpx.HTTPStatusError("server", request=request, response=resp_500)

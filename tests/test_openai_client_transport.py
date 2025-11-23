@@ -34,6 +34,8 @@ async def test_http_transport_streams_and_sets_headers() -> None:
     assert recorded["payload"] == {"hello": "world"}
     assert recorded["headers"]["authorization"] == "Bearer abc"
     assert recorded["headers"]["content-type"] == "application/json"
+    assert recorded["headers"]["user-agent"] == "lincona/0.1.0"
+    assert recorded["headers"]["openai-beta"] == "responses-2024-10-01"
     assert chunks == ['data: {"delta":"hi"}', "data: [DONE]"]
 
 

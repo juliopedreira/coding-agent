@@ -28,6 +28,8 @@ class HttpResponsesTransport:
         base_url: str = "https://api.openai.com/v1",
         timeout: httpx.Timeout | float | None = None,
         client: httpx.AsyncClient | None = None,
+        user_agent: str | None = "lincona/0.1.0",
+        beta_header: str | None = "responses-2024-10-01",
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key cannot be empty")
@@ -37,6 +39,8 @@ class HttpResponsesTransport:
         self.timeout = timeout or DEFAULT_TIMEOUT
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(timeout=self.timeout)
+        self._user_agent = user_agent
+        self._beta_header = beta_header
 
     async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
         url = f"{self.base_url}/responses"
@@ -44,6 +48,10 @@ class HttpResponsesTransport:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        if self._user_agent:
+            headers["User-Agent"] = self._user_agent
+        if self._beta_header:
+            headers["OpenAI-Beta"] = self._beta_header
 
         async with self._client.stream("POST", url, json=payload, headers=headers, timeout=self.timeout) as response:
             response.raise_for_status()
