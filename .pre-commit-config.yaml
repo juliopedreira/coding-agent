@@ -26,9 +26,11 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+        env:
+          MYPY_CACHE_DIR: .mypy_cache
       - id: pytest
         name: pytest
-        entry: poetry run pytest
+        entry: poetry run pytest -q --maxfail=1
         language: system
         types: [python]
         pass_filenames: false

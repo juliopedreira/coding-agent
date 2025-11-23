@@ -37,3 +37,12 @@ Run on demand:
 ```sh
 POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 ```
+
+## Quick start
+- Show version: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona --version`
+- Run the placeholder CLI: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona`
+  - Currently prints a stub message; real TUI/commands arrive in later epics.
+
+## Maintenance tips
+- After changing dependencies, regenerate the lockfile: `make lock`
+- If the virtualenv breaks, remove `.venv/` and run `make install`
