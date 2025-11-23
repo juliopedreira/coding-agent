@@ -1,10 +1,11 @@
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, load_settings
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, load_settings, write_config
 
 
 def test_settings_defaults() -> None:
@@ -156,3 +157,39 @@ def test_existing_permissions_are_corrected(tmp_path: Path) -> None:
 
     mode = config_path.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_write_config_round_trip(tmp_path: Path) -> None:
+    config_path = tmp_path / "nested" / "config.toml"
+    settings = Settings(
+        api_key="token",
+        model="gpt-4.1",
+        reasoning_effort=ReasoningEffort.HIGH,
+        fs_mode=FsMode.UNRESTRICTED,
+        approval_policy=ApprovalPolicy.ALWAYS,
+        log_level=LogLevel.DEBUG,
+    )
+
+    written_path = write_config(settings, config_path)
+
+    assert written_path == config_path
+    assert written_path.exists()
+    mode = written_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+    reloaded = load_settings(config_path=config_path, env={})
+
+    assert reloaded == settings
+
+
+def test_write_config_omits_auth_when_missing(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    settings = Settings(api_key=None)
+
+    write_config(settings, config_path)
+
+    content = config_path.read_text()
+    assert "[auth]" not in content
+
+    reloaded = tomllib.load(config_path.open("rb"))
+    assert "auth" not in reloaded

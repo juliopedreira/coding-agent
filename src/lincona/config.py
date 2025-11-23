@@ -167,6 +167,44 @@ def load_settings(
     )
 
 
+def write_config(settings: Settings, config_path: Path | str | None = None) -> Path:
+    """Serialize settings to TOML using the documented layout.
+
+    Only non-None values are written. Parent directories are created and file
+    permissions are enforced to 600.
+    """
+
+    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    auth_section: dict[str, Any] = {}
+    if settings.api_key is not None:
+        auth_section["api_key"] = settings.api_key
+    _append_section(sections, "auth", auth_section)
+
+    model_section = {
+        "id": settings.model,
+        "reasoning_effort": settings.reasoning_effort.value,
+    }
+    _append_section(sections, "model", model_section)
+
+    runtime_section = {
+        "fs_mode": settings.fs_mode.value,
+        "approval_policy": settings.approval_policy.value,
+    }
+    _append_section(sections, "runtime", runtime_section)
+
+    logging_section = {"log_level": settings.log_level.value}
+    _append_section(sections, "logging", logging_section)
+
+    content = "\n\n".join(sections) + "\n"
+    path.write_text(content, encoding="utf-8")
+    path.chmod(EXPECTED_FILE_MODE)
+    return path
+
+
 def _ensure_permissions(path: Path) -> None:
     """Force config file permissions to 600 (owner read/write)."""
 
@@ -201,6 +239,19 @@ def _first_value(*candidates: Any) -> Any:
     return None
 
 
+def _append_section(parts: list[str], name: str, values: Mapping[str, Any]) -> None:
+    if not values:
+        return
+    lines = [f"[{name}]"]
+    for key, val in values.items():
+        if isinstance(val, str):
+            escaped = val.replace('"', '\\"')
+            lines.append(f'{key} = "{escaped}"')
+        else:
+            lines.append(f"{key} = {val}")
+    parts.append("\n".join(lines))
+
+
 __all__ = [
     "Settings",
     "FsMode",
@@ -209,4 +260,5 @@ __all__ = [
     "ReasoningEffort",
     "DEFAULT_CONFIG_PATH",
     "load_settings",
+    "write_config",
 ]
