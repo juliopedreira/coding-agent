@@ -162,6 +162,7 @@ async def test_defaults_applied_when_missing() -> None:
         default_model="gpt-4.1-mini",
         default_reasoning_effort="medium",
         default_timeout=5.0,
+        base_url="https://mock.local",
     )
 
     request = ConversationRequest(
@@ -178,6 +179,7 @@ async def test_defaults_applied_when_missing() -> None:
     assert payload["model"] == "gpt-4.1-mini"
     assert payload["reasoning"] == {"effort": "medium"}
     assert payload["timeout"] == 5.0
+    assert payload["base_url"] == "https://mock.local"
 
 
 @pytest.mark.asyncio

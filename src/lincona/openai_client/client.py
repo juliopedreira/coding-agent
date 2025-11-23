@@ -38,12 +38,14 @@ class OpenAIResponsesClient:
         default_model: str | None = None,
         default_reasoning_effort: str | None = None,
         default_timeout: float | None = None,
+        base_url: str | None = None,
     ) -> None:
         self._transport = transport
         self._max_tool_buffer_bytes = max_tool_buffer_bytes
         self._default_model = default_model
         self._default_reasoning_effort = default_reasoning_effort
         self._default_timeout = default_timeout
+        self._base_url = base_url
 
     async def submit(self, request: ConversationRequest) -> AsyncIterator[ResponseEvent]:
         """Submit a conversation request and yield parsed streaming events."""
@@ -109,6 +111,9 @@ class OpenAIResponsesClient:
         timeout = request.timeout if request.timeout is not None else self._default_timeout
         if timeout is not None:
             payload["timeout"] = timeout
+
+        if self._base_url:
+            payload["base_url"] = self._base_url
 
         return payload
 
