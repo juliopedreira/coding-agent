@@ -168,47 +168,51 @@ async def consume_stream(source: AsyncIterator[ResponseEvent], *, queue_max: int
 
     queue: asyncio.Queue[ResponseEvent | BaseException | _Sentinel] = asyncio.Queue(maxsize=queue_max)
     sentinel = _Sentinel()
-    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
     async def _producer() -> None:
-        src = cast(AsyncIterator[Any], source)
         try:
-            async for item in src:
-                await queue.put(item)
-                if stop_event.is_set():
-                    break
+            async for item in source:
+                try:
+                    if loop.is_closed():
+                        return
+                    await queue.put(item)
+                except GeneratorExit:
+                    return
         except asyncio.CancelledError:
-            return
-        except BaseException as exc:  # propagate to consumer
-            if not stop_event.is_set():
-                with contextlib.suppress(Exception):
+            raise
+        except BaseException as exc:
+            with contextlib.suppress(GeneratorExit):
+                if not loop.is_closed():
                     await queue.put(exc)
         finally:
-            with contextlib.suppress(Exception):
-                aclose = getattr(src, "aclose", None)
-                if callable(aclose):
-                    await aclose()
-                if not stop_event.is_set():
-                    try:
-                        await queue.put(sentinel)
-                    except RuntimeError:
-                        return
+            with contextlib.suppress(Exception, GeneratorExit):
+                if not loop.is_closed():
+                    await queue.put(sentinel)
 
-    producer_task = asyncio.create_task(_producer())
-
+    producer = asyncio.create_task(_producer())
+    sentinel_seen = False
     try:
         while True:
             item = await queue.get()
             if item is sentinel:
+                sentinel_seen = True
                 break
             if isinstance(item, BaseException):
                 raise item
             yield cast(ResponseEvent, item)
     finally:
-        stop_event.set()
-        producer_task.cancel()
+        if not sentinel_seen:
+            # drain until sentinel arrives to let producer finish cleanly
+            with contextlib.suppress(Exception):
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+        if not producer.done():
+            producer.cancel()
         with contextlib.suppress(Exception, asyncio.CancelledError):
-            await producer_task
+            await producer
 
 
 class _Sentinel:

@@ -55,6 +55,50 @@ async def test_consume_stream_drains_all_items() -> None:
 
 
 @pytest.mark.asyncio
+async def test_done_sentinel_mixed_lines() -> None:
+    chunks = [
+        'data: {"type":"text_delta","delta":{"text":"hi"}}',
+        "[DONE]",
+    ]
+
+    events = await collect_events(chunks)
+    assert isinstance(events[-1], MessageDone)
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_raises_streaming_parse_error() -> None:
+    chunks = ['data: {"type": "text_delta", }']
+
+    with pytest.raises(StreamingParseError):
+        await collect_events(chunks)
+
+
+@pytest.mark.asyncio
+async def test_buffer_limit_boundary_allows_exact_size() -> None:
+    limit = 16
+    payload = "x" * limit
+    chunks = [
+        'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+        f'data: {{"type":"tool_call_delta","delta":{{"id":"tc1","arguments_delta":"{payload}"}}}}\n',
+        'data: {"type":"tool_call_end","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+    ]
+
+    events = await collect_events(chunks, max_tool_buffer_bytes=limit)
+    assert isinstance(events[-1], ToolCallEnd)
+
+
+@pytest.mark.asyncio
+async def test_consume_stream_propagates_errors_from_source() -> None:
+    async def source():
+        yield TextDelta(text="ok")
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        async for _ in consume_stream(source()):
+            pass
+
+
+@pytest.mark.asyncio
 async def test_parses_text_delta_and_done() -> None:
     chunks = [
         'data: {"type":"text_delta","delta":{"text":"hi"}}\n',
