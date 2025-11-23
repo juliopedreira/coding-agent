@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -174,3 +175,80 @@ async def test_defaults_applied_when_missing() -> None:
     assert payload["model"] == "gpt-4.1-mini"
     assert payload["reasoning"] == {"effort": "medium"}
     assert payload["timeout"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_calls_round_trip() -> None:
+    transport = CapturingTransport(
+        chunks=[
+            'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+            'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"{","name":"run"}}\n',
+            'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"\\"a\\":1}"}}\n',
+            'data: {"type":"tool_call_end","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+            "data: [DONE]\n",
+        ]
+    )
+    client = OpenAIResponsesClient(transport)
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+
+    events = [event async for event in client.submit(request)]
+
+    kinds = [type(e).__name__ for e in events]
+    assert kinds[:3] == ["ToolCallStart", "ToolCallDelta", "ToolCallDelta"]
+    assert kinds[3] == "ToolCallEnd"
+    assert kinds[-1] == "MessageDone"
+
+
+@pytest.mark.asyncio
+async def test_cancel_early_does_not_error() -> None:
+    transport = CapturingTransport(
+        chunks=[
+            'data: {"type":"text_delta","delta":{"text":"hi"}}\n',
+            'data: {"type":"text_delta","delta":{"text":"there"}}\n',
+            "data: [DONE]\n",
+        ]
+    )
+    client = OpenAIResponsesClient(transport)
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+
+    received: list[str] = []
+    async for event in client.submit(request):
+        received.append(type(event).__name__)
+        break  # stop early to simulate cancellation/back-pressure
+
+    assert received == ["TextDelta"]
+
+
+@pytest.mark.asyncio
+async def test_backpressure_with_slow_consumer() -> None:
+    gate = asyncio.Event()
+
+    class GatedTransport:
+        def __init__(self) -> None:
+            self.started = False
+
+        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+            self.started = True
+            yield 'data: {"type":"text_delta","delta":{"text":"one"}}\n'
+            await gate.wait()
+            yield 'data: {"type":"text_delta","delta":{"text":"two"}}\n'
+            yield "data: [DONE]\n"
+
+    transport = GatedTransport()
+    client = OpenAIResponsesClient(transport)
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+
+    events_iter = client.submit(request)
+
+    results = []
+
+    async def consume() -> None:
+        async for event in events_iter:
+            results.append(event)
+            if len(results) == 1:
+                await asyncio.sleep(0.05)
+                gate.set()
+
+    await consume()
+
+    assert len(results) == 3  # two TextDelta + MessageDone
