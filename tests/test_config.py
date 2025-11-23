@@ -1,13 +1,10 @@
+from collections.abc import Mapping
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from lincona.config import (
-    ApprovalPolicy,
-    FsMode,
-    LogLevel,
-    ReasoningEffort,
-    Settings,
-)
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, load_settings
 
 
 def test_settings_defaults() -> None:
@@ -58,3 +55,104 @@ def test_api_key_strips_whitespace() -> None:
     settings = Settings(api_key="  secret  ")
 
     assert settings.api_key == "secret"
+
+
+def test_load_settings_defaults_without_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+
+    settings = load_settings(config_path=config_path, env={})
+
+    assert settings.model == "gpt-4.1-mini"
+    assert config_path.exists() is False
+
+
+def test_load_settings_reads_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[auth]
+api_key = "from_config"
+
+[model]
+id = "gpt-4.1"
+reasoning_effort = "low"
+
+[runtime]
+fs_mode = "unrestricted"
+approval_policy = "always"
+
+[logging]
+log_level = "debug"
+"""
+    )
+
+    settings = load_settings(config_path=config_path, env={})
+
+    assert settings.api_key == "from_config"
+    assert settings.model == "gpt-4.1"
+    assert settings.reasoning_effort is ReasoningEffort.LOW
+    assert settings.fs_mode is FsMode.UNRESTRICTED
+    assert settings.approval_policy is ApprovalPolicy.ALWAYS
+    assert settings.log_level is LogLevel.DEBUG
+
+
+def test_env_overrides_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[auth]
+api_key = "from_config"
+"""
+    )
+    env: Mapping[str, str] = {"OPENAI_API_KEY": "from_env"}
+
+    settings = load_settings(config_path=config_path, env=env)
+
+    assert settings.api_key == "from_env"
+
+
+def test_cli_overrides_env_and_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[model]
+id = "config-model"
+
+[runtime]
+approval_policy = "on-request"
+"""
+    )
+    env = {"OPENAI_API_KEY": "env_key"}
+    cli = {"model": "cli-model", "approval_policy": "always"}
+
+    settings = load_settings(config_path=config_path, env=env, cli_overrides=cli)
+
+    assert settings.model == "cli-model"
+    assert settings.approval_policy is ApprovalPolicy.ALWAYS
+    assert settings.api_key == "env_key"
+
+
+def test_create_if_missing_sets_permissions(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+
+    settings = load_settings(config_path=config_path, env={}, create_if_missing=True)
+
+    assert settings.model == "gpt-4.1-mini"
+    assert config_path.exists()
+    mode = config_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_existing_permissions_are_corrected(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("\n")
+    config_path.chmod(0o644)
+
+    load_settings(config_path=config_path, env={})
+
+    mode = config_path.stat().st_mode & 0o777
+    assert mode == 0o600
