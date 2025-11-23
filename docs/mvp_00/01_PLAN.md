@@ -2,7 +2,7 @@
 
 Each epic is self-contained and executable by an engineer without other context. Update the checkbox when completed.
 
-## Epic 1: Project Skeleton & Tooling [ ] Done
+## Epic 1: Project Skeleton & Tooling [x] Done
 1. Initialize Poetry project for Python 3.11, package name `lincona`, CLI entrypoint `lincona` (console_script).
 2. Directory layout: `src/lincona/` for code, `tests/` for unit tests, `docs/` already present, `scripts/` optional helpers.
 3. Add `pyproject.toml` with dependencies: textual/rich (TUI), httpx (OpenAI), pydantic/attrs/dataclasses for configs, typing-extensions, asyncio, prompt_toolkit optional for input history if needed outside TUI. Dev deps: black, ruff, isort, mypy, pytest, pytest-cov, pytest-asyncio, freezegun, types-* stubs as needed.
