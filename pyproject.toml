@@ -8,7 +8,12 @@ version = "0.1.0"
 description = "Linux-only interactive coding agent CLI"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
-dependencies = []
+dependencies = [
+    "textual",
+    "httpx>=0.27,<0.28",
+    "pydantic>=2,<3",
+    "typing-extensions>=4.7,<5",
+]
 
 [project.scripts]
 lincona = "lincona.cli:main"
@@ -16,3 +21,13 @@ lincona = "lincona.cli:main"
 [tool.poetry]
 # Keep package include layout for Poetry's build backend
 packages = [{ include = "lincona", from = "src" }]
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24,<25"
+ruff = ">=0.6,<0.7"
+isort = ">=5.13,<6"
+mypy = ">=1.10,<2"
+pytest = ">=7.4,<9"
+pytest-cov = ">=4,<6"
+pytest-asyncio = ">=0.23,<0.24"
+freezegun = ">=1.4,<2"
