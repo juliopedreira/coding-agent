@@ -1,39 +1,27 @@
 # Lincona Architecture (MVP_00 snapshot)
 
-This document summarizes the current code structure with emphasis on config/persistence (Epic 2).
+High-level view of the current codebase (Epics 1–3 complete; TUI/tools arrive later).
 
-## Config
-- File: `src/lincona/config.py`
-- `Settings` (pydantic, frozen) with defaults: model `gpt-4.1-mini`, reasoning `medium`, `fs_mode=restricted`, `approval_policy=on-request`, `log_level=warning`.
-- `load_settings`: precedence CLI > env (`OPENAI_API_KEY`) > config file > defaults; enforces 0o600 perms; optional create.
-- `write_config`: serializes to TOML layout `[auth]`, `[model]`, `[runtime]`, `[logging]`.
+## Runtime core
+- **Config & paths** (`src/lincona/config.py`, `paths.py`): immutable `Settings`, precedence CLI > env > file > defaults; config at `~/.lincona/config.toml` (mode 600); `LINCONA_HOME` override for all data.
+- **Persistence** (`src/lincona/sessions.py`): strict `Event` schema, JSONL writer/reader, session IDs `YYYYMMDDHHMM-uuid4`, helpers to list/resume/delete.
+- **Logging** (`src/lincona/logging.py`): per-session file logger, truncation guard (default 5 MB), level validation.
+- **Shutdown** (`src/lincona/shutdown.py`): one-shot manager for callbacks/loggers/writers; restores signal handlers; safe on SIGINT/SIGTERM/atexit.
 
-## Paths
-- File: `src/lincona/paths.py`
-- `LINCONA_HOME` env overrides base directory; defaults to `~/.lincona`.
+## OpenAI Responses client (Epic 3)
+- Package: `lincona.openai_client/`
+  - `types.py`: request/response dataclasses, event union, error classes.
+  - `transport.py`: protocol + HTTP transport (headers, retry-after parsing, logging hook, base_url override) and mock transport.
+  - `parsing.py`: SSE → events, tool-call lifecycle, size guards, bounded `consume_stream` for back-pressure.
+  - `client.py`: assembles payloads with defaults, streams events, emits `ErrorEvent` on failures.
 
-## Sessions & Persistence
-- File: `src/lincona/sessions.py`
-- `generate_session_id`: `YYYYMMDDHHMM-uuid4`.
-- `Event` schema (pydantic, strict) + `Role` enum.
-- `JsonlEventWriter`: append-only writer with optional `fsync_every`, explicit `sync()`; `iter_events` for validated reads.
-- Helpers: `session_path`, `list_sessions`, `resume_session`, `delete_session` (all respect `LINCONA_HOME`).
+## CLI entry
+- `src/lincona/cli.py`: placeholder CLI stub (TUI/tooling to be added in later epics).
 
-## Logging
-- File: `src/lincona/logging.py`
-- `configure_session_logger`: per-session file handler, truncates to last N bytes (default 5MB; disable with `max_bytes=None`), warns on unknown log levels.
-- `session_log_path` uses `LINCONA_HOME`.
+## Data layout (default `~/.lincona/`)
+- `config.toml`
+- `sessions/<id>.jsonl`
+- `logs/<id>.log`
 
-## Shutdown
-- File: `src/lincona/shutdown.py`
-- `ShutdownManager`: registers callbacks, event writers, and loggers; runs once on SIGINT/SIGTERM/atexit; logs callback failures; restores prior signal handlers; `register_resources` convenience.
-
-## CLI (stub)
-- File: `src/lincona/cli.py`
-- Placeholder entrypoint (version flag, stub message); to be replaced by TUI/tooling in later epics.
-
-## Tests
-- Config, sessions, logging, and shutdown have unit tests under `tests/` covering precedence, permissions, schema strictness, truncation, durability toggles, and shutdown ordering.
-
-## Data locations
-- `config.toml`, `sessions/<id>.jsonl`, `logs/<id>.log` under `LINCONA_HOME` (default `~/.lincona`).
+## Testing
+- Unit tests cover config precedence/permissions, sessions, logging/shutdown, OpenAI client (types/transport/parsing/client/back-pressure/errors). Coverage gate ≥80% per source file via `make ci`.

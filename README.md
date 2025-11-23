@@ -52,7 +52,12 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 - Environment: `OPENAI_API_KEY` overrides `api_key` in config.
 
 ## Architecture quick peek
-See `ARCHITECTURE.md` for a current overview of config loading, persistence, logging, and shutdown handling.
+- Config & paths: `lincona.config`, `lincona.paths` load persisted defaults from `~/.lincona/config.toml` with precedence CLI > env > file > defaults.
+- Persistence: `lincona.sessions` manages JSONL event streams and IDs; `lincona.logging` creates per-session logs with truncation.
+- Shutdown: `lincona.shutdown.ShutdownManager` closes writers/loggers safely on SIGINT/SIGTERM/atexit.
+- OpenAI client: `lincona.openai_client` offers an async Responses client with streaming parser, pluggable transports (HTTP/mock), back-pressure helper, error events, logging hook, and base URL override.
+- CLI: `lincona.cli` stub (TUI and tooling arrive in later epics).
+See `ARCHITECTURE.md` for details.
 
 ## OpenAI Responses client (Epic 3)
 - Package: `lincona.openai_client`.
