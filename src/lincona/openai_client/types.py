@@ -96,8 +96,7 @@ class ToolCallPayload:
             raise ValueError("tool call id cannot be empty")
         if not self.name.strip():
             raise ValueError("tool call name cannot be empty")
-        if not self.arguments:
-            raise ValueError("tool call arguments cannot be empty")
+        # arguments may stream in incrementally; empty is permitted at start.
 
 
 @dataclass(frozen=True, slots=True)

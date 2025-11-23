@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .parsing import DEFAULT_MAX_TOOL_BUFFER_BYTES, parse_stream  # noqa: F401
 from .transport import HttpResponsesTransport, MockResponsesTransport, ResponsesTransport  # noqa: F401
 from .types import (  # noqa: F401
     ApiAuthError,
