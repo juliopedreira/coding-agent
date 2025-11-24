@@ -30,7 +30,7 @@ Each epic is self-contained and executable by an engineer without other context.
 5. Pluggable transport: real HTTP and a mockable in-memory client for unit tests; toggle via config/flag for E2E.
 6. Ensure back-pressure/flow control so TUI can render streams smoothly.
 
-## Epic 4: Tooling Core & Filesystem Boundaries [ ] Done
+## Epic 4: Tooling Core & Filesystem Boundaries [x] Done
 1. Implement `fs_mode` enforcement:
    - `restricted`: root = process cwd (or detected git root of cwd); reject paths escaping root; normalize relative/absolute inputs.
    - `unrestricted`: allow absolute paths.

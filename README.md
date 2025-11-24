@@ -56,6 +56,7 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 - Persistence: `lincona.sessions` manages JSONL event streams and IDs; `lincona.logging` creates per-session logs with truncation.
 - Shutdown: `lincona.shutdown.ShutdownManager` closes writers/loggers safely on SIGINT/SIGTERM/atexit.
 - OpenAI client: `lincona.openai_client` offers an async Responses client with streaming parser, pluggable transports (HTTP/mock), back-pressure helper, error events, logging hook, and base URL override.
+- Tools core (Epic 4 in progress): `lincona.tools` implements filesystem boundaries, output limits, file tools (`list_dir`, `read_file`, `grep_files`), patch apply (unified + freeform), shell and PTY exec, approval guard, and tool router.
 - CLI: `lincona.cli` stub (TUI and tooling arrive in later epics).
 See `ARCHITECTURE.md` for details.
 

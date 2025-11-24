@@ -15,6 +15,14 @@ High-level view of the current codebase (Epics 1–3 complete; TUI/tools arrive 
   - `parsing.py`: SSE → events, tool-call lifecycle, size guards, bounded `consume_stream` for back-pressure.
   - `client.py`: assembles payloads with defaults, streams events, emits `ErrorEvent` on failures.
 
+## Tools core (Epic 4 in progress)
+- Package: `lincona.tools/`
+  - Boundary & limits: `fs.py` (restricted vs unrestricted roots), `limits.py` (byte/line truncation).
+  - File tools: `list_dir.py`, `read_file.py`, `grep_files.py` (respect FsBoundary).
+  - Patch tools: `patch_parser.py` (unified + freeform envelopes), `apply_patch.py` (atomic apply with boundary enforcement).
+  - Command tools: `shell.py` (capped output, timeouts), `exec_pty.py` (PTY manager with close_all), approval guard (`approval.py`), router (`router.py`) to advertise specs and dispatch calls.
+- Shutdown integration: `ShutdownManager.register_pty_manager` closes PTY sessions on exit.
+
 ## CLI entry
 - `src/lincona/cli.py`: placeholder CLI stub (TUI/tooling to be added in later epics).
 
