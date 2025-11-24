@@ -1,6 +1,6 @@
 # Lincona Architecture (MVP_00 snapshot)
 
-High-level view of the current codebase (Epics 1–3 complete; TUI/tools arrive later).
+High-level view of the current codebase (Epics 1–4 complete; Conversation/TUI/CLIs arrive in later epics).
 
 ## Runtime core
 - **Config & paths** (`src/lincona/config.py`, `paths.py`): immutable `Settings`, precedence CLI > env > file > defaults; config at `~/.lincona/config.toml` (mode 600); `LINCONA_HOME` override for all data.
@@ -16,6 +16,7 @@ High-level view of the current codebase (Epics 1–3 complete; TUI/tools arrive 
   - `client.py`: assembles payloads with defaults, streams events, emits `ErrorEvent` on failures.
 
 ## Tools core (Epic 4 in progress)
+### Tools core (Epic 4 complete)
 - Package: `lincona.tools/`
   - Boundary & limits: `fs.py` (restricted vs unrestricted roots), `limits.py` (byte/line truncation).
   - File tools: `list_dir.py`, `read_file.py`, `grep_files.py` (respect FsBoundary).

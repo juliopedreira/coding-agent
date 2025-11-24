@@ -152,10 +152,15 @@ class ToolRouter:
         boundary: FsBoundary,
         approval_policy: ApprovalPolicy,
         pty_manager: PtyManager | None = None,
+        shutdown_manager: Any | None = None,
     ) -> None:
         self.boundary = boundary
         self.approval_policy = approval_policy
         self.pty_manager = pty_manager or PtyManager(boundary)
+        if shutdown_manager is not None:
+            register = getattr(shutdown_manager, "register_pty_manager", None)
+            if callable(register):
+                register(self.pty_manager)
 
     def dispatch(self, name: str, **kwargs: Any) -> Any:
         if name == "list_dir":

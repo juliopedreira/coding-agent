@@ -12,7 +12,7 @@ Each epic is self-contained and executable by an engineer without other context.
 7. Ensure `poetry lock` committed; document `poetry install` workflow and venv activation.
 8. Add Makefile or `scripts/dev.sh` wrapper (optional) for `format`, `lint`, `typecheck`, `test` commands via Poetry for contributor convenience.
 
-## Epic 2: Config & Persistence Layer [ ] Done
+## Epic 2: Config & Persistence Layer [x] Done
 1. Config file path `~/.lincona/config.toml`; create parent dirs on first run.
 2. Fields: `api_key`, `model`, `reasoning_effort`, `fs_mode`, `approval_policy`, `log_level`; env var `OPENAI_API_KEY` overrides `api_key`; CLI overrides config.
 3. Provide config load/save helpers with precedence: CLI flags > env > config file > hardcoded defaults.
