@@ -135,6 +135,17 @@ def test_session_list_resume_delete(tmp_path: Path) -> None:
     delete_session(session_id, base_dir)
 
 
+def test_writer_recovers_after_close(tmp_path: Path) -> None:
+    path = tmp_path / "session.jsonl"
+    writer = JsonlEventWriter(path)
+    writer.append(sample_event())
+    writer.close()
+    writer.append(sample_event())
+    writer.close()
+    events = list(iter_events(path))
+    assert len(events) == 2
+
+
 def test_session_paths_respect_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
 

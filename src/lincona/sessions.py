@@ -63,6 +63,7 @@ class JsonlEventWriter:
         self._since_fsync = 0
 
     def append(self, event: Event) -> None:
+        self._ensure_open()
         line = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
         self._file.write(line + "\n")
         self._file.flush()
@@ -75,6 +76,7 @@ class JsonlEventWriter:
     def sync(self) -> None:
         """Force flush and fsync regardless of fsync_every settings."""
 
+        self._ensure_open()
         self._file.flush()
         os.fsync(self._file.fileno())
 
@@ -85,6 +87,13 @@ class JsonlEventWriter:
         os.fsync(self._file.fileno())
         self._file.close()
         self._closed = True
+
+    def _ensure_open(self) -> None:
+        """Re-open the underlying file if it was closed."""
+
+        if self._closed or self._file.closed:
+            self._file = self.path.open("a", encoding="utf-8")
+            self._closed = False
 
     def __enter__(self) -> JsonlEventWriter:
         return self
