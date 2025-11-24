@@ -1,7 +1,4 @@
-import subprocess
 from pathlib import Path
-
-import pytest
 
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
@@ -19,8 +16,10 @@ def test_shell_runs_command(tmp_path: Path) -> None:
 
 def test_shell_timeout(tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    with pytest.raises(subprocess.TimeoutExpired):
-        run_shell(boundary, "sleep 1", timeout_ms=10)
+    result = run_shell(boundary, "sleep 1", timeout_ms=10)
+
+    assert result["timeout"] is True
+    assert result["returncode"] is None
 
 
 def test_shell_truncation(tmp_path: Path) -> None:

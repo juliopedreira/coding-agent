@@ -9,7 +9,8 @@ def test_never_allows() -> None:
 
 
 def test_on_request_allows() -> None:
-    approval_guard(ApprovalPolicy.ON_REQUEST, "apply_patch")
+    with pytest.raises(ApprovalRequiredError):
+        approval_guard(ApprovalPolicy.ON_REQUEST, "apply_patch")
 
 
 def test_always_blocks() -> None:

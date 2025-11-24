@@ -16,15 +16,23 @@ from lincona.tools.shell import run_shell
 
 
 def tool_specs() -> list[dict[str, Any]]:
-    """Return JSON tool specs (minimal) plus freeform apply_patch descriptor."""
+    """Return JSON tool specs matching MVP_00 parameters."""
 
-    specs: list[dict[str, Any]] = [
+    return [
         {
             "type": "function",
             "function": {
                 "name": "list_dir",
                 "description": "List directory entries up to depth",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "default": "."},
+                        "depth": {"type": "integer", "default": 2, "minimum": 0},
+                        "offset": {"type": "integer", "default": 0, "minimum": 0},
+                        "limit": {"type": "integer", "default": 200, "minimum": 1},
+                    },
+                },
             },
         },
         {
@@ -32,7 +40,17 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "read_file",
                 "description": "Read file slice with optional indentation mode",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "offset": {"type": "integer", "default": 0, "minimum": 0},
+                        "limit": {"type": "integer", "default": 400, "minimum": 1},
+                        "mode": {"type": "string", "enum": ["slice", "indentation"], "default": "slice"},
+                        "indent": {"type": "string", "default": "    "},
+                    },
+                    "required": ["path"],
+                },
             },
         },
         {
@@ -40,7 +58,16 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "grep_files",
                 "description": "Recursive regex search with include globs",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string"},
+                        "path": {"type": "string", "default": "."},
+                        "include": {"type": "array", "items": {"type": "string"}},
+                        "limit": {"type": "integer", "default": 200, "minimum": 1},
+                    },
+                    "required": ["pattern"],
+                },
             },
         },
         {
@@ -48,7 +75,11 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "apply_patch_json",
                 "description": "Apply unified diff",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"patch": {"type": "string"}},
+                    "required": ["patch"],
+                },
             },
         },
         {
@@ -56,7 +87,11 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "apply_patch_freeform",
                 "description": "Apply patch using freeform envelope",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"patch": {"type": "string"}},
+                    "required": ["patch"],
+                },
             },
         },
         {
@@ -64,7 +99,15 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "shell",
                 "description": "Run a shell command",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "workdir": {"type": "string"},
+                        "timeout_ms": {"type": "integer", "default": 60000, "minimum": 1},
+                    },
+                    "required": ["command"],
+                },
             },
         },
         {
@@ -72,7 +115,15 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "exec_command",
                 "description": "Run a PTY-backed long command",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "cmd": {"type": "string"},
+                        "workdir": {"type": "string"},
+                    },
+                    "required": ["session_id", "cmd"],
+                },
             },
         },
         {
@@ -80,20 +131,17 @@ def tool_specs() -> list[dict[str, Any]]:
             "function": {
                 "name": "write_stdin",
                 "description": "Send input to existing PTY session",
-                "parameters": {"type": "object"},
-            },
-        },
-        # freeform apply_patch
-        {
-            "type": "function",
-            "function": {
-                "name": "apply_patch_freeform",
-                "description": "Apply patch using freeform tool calls.",
-                "parameters": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "chars": {"type": "string"},
+                    },
+                    "required": ["session_id", "chars"],
+                },
             },
         },
     ]
-    return specs
 
 
 class ToolRouter:

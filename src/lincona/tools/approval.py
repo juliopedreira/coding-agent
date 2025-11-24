@@ -12,9 +12,9 @@ class ApprovalRequiredError(Exception):
 def approval_guard(policy: ApprovalPolicy, tool_name: str) -> None:
     """Guard mutating tools based on approval policy."""
 
-    if policy == ApprovalPolicy.NEVER or policy == ApprovalPolicy.ON_REQUEST:
+    if policy == ApprovalPolicy.NEVER:
         return
-    if policy == ApprovalPolicy.ALWAYS:
+    if policy in (ApprovalPolicy.ALWAYS, ApprovalPolicy.ON_REQUEST):
         raise ApprovalRequiredError(f"approval required for tool {tool_name}")
     # fallback: allow
 
