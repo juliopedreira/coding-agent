@@ -28,6 +28,7 @@ class Hunk:
 class FilePatch:
     path: Path
     hunks: list[Hunk]
+    delete: bool = False
 
 
 _HUNK_HEADER = re.compile(r"@@ -(\d+),?(\d+)? \+(\d+),?(\d+)? @@")
@@ -53,19 +54,27 @@ def parse_unified_diff(diff_text: str) -> list[FilePatch]:
 
     while idx < len(lines):
         line = lines[idx]
+        if line.startswith("Binary files "):
+            raise PatchParseError("binary patches not supported")
         if line.startswith("--- "):
             if idx + 1 >= len(lines) or not lines[idx + 1].startswith("+++ "):
                 raise PatchParseError("missing +++ header")
+            old_path = _normalize_path(lines[idx][4:].strip().split("\t")[0])
             new_path = _normalize_path(lines[idx + 1][4:].strip().split("\t")[0])
-            file_path = Path(new_path)
+            file_path = Path(new_path if new_path != "/dev/null" else old_path)
             idx += 2
+            delete = new_path == "/dev/null"
             hunks, idx = _parse_hunks(lines, idx)
-            patches.append(FilePatch(path=file_path, hunks=hunks))
+            patches.append(FilePatch(path=file_path, hunks=hunks, delete=delete))
         elif line.startswith("*** Update File:"):
             file_path = Path(_normalize_path(line.split(":", 1)[1].strip()))
             idx += 1
             hunks, idx = _parse_hunks(lines, idx)
             patches.append(FilePatch(path=file_path, hunks=hunks))
+        elif line.startswith("*** Delete File:"):
+            file_path = Path(_normalize_path(line.split(":", 1)[1].strip()))
+            patches.append(FilePatch(path=file_path, hunks=[], delete=True))
+            idx += 1
         else:
             idx += 1
 

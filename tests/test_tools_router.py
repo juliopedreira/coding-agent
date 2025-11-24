@@ -64,7 +64,7 @@ def test_dispatch_apply_patch_freeform(tmp_path):
 
     router.dispatch("apply_patch_freeform", patch=patch)
 
-    assert target.read_text(encoding="utf-8") == "new"
+    assert target.read_text(encoding="utf-8") == "new\n"
 
 
 def test_dispatch_apply_patch_json(tmp_path):

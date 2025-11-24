@@ -21,7 +21,7 @@ def test_apply_simple_patch(tmp_path: Path) -> None:
 
     results = apply_patch(boundary, patch)
 
-    assert target.read_text(encoding="utf-8") == "new"
+    assert target.read_text(encoding="utf-8") == "new\n"
     assert results[0].created is False
 
 
@@ -80,7 +80,41 @@ def test_apply_freeform_envelope(tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     apply_patch(boundary, patch, freeform=True)
 
-    assert target.read_text(encoding="utf-8") == "new"
+    assert target.read_text(encoding="utf-8") == "new\n"
+
+
+def test_delete_file(tmp_path: Path) -> None:
+    target = tmp_path / "gone.txt"
+    target.write_text("bye", encoding="utf-8")
+    patch = """--- a/gone.txt
++++ /dev/null
+@@ -1,1 +0,0 @@
+-bye
+"""
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    apply_patch(boundary, patch)
+    assert not target.exists()
+
+
+def test_reject_binary_patch(tmp_path: Path) -> None:
+    patch = "Binary files a/foo and b/foo differ\n"
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    with pytest.raises(PatchParseError):
+        apply_patch(boundary, patch)
+
+
+def test_preserves_trailing_newline(tmp_path: Path) -> None:
+    target = tmp_path / "file.txt"
+    target.write_text("line\n", encoding="utf-8")
+    patch = """--- a/file.txt
++++ b/file.txt
+@@ -1,1 +1,1 @@
+-line
++line
+"""
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    apply_patch(boundary, patch)
+    assert target.read_text(encoding="utf-8").endswith("\n")
 
 
 def test_apply_directory_target_raises(tmp_path: Path) -> None:

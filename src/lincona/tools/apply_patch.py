@@ -34,21 +34,35 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
     results: list[PatchResult] = []
 
     for file_patch in file_patches:
+        if getattr(file_patch, "delete", False) and str(file_patch.path) == "/dev/null":
+            # nothing to delete
+            continue
+
         target = boundary.sanitize_path(file_patch.path)
         boundary.assert_within_root(target)
 
         original_lines: list[str] = []
+        had_trailing = False
         exists = target.exists()
         if exists:
             if target.is_dir():
                 raise PatchApplyError(f"target {target} is a directory")
-            original_lines = target.read_text(encoding="utf-8").splitlines()
+            original_text = target.read_text(encoding="utf-8")
+            had_trailing = original_text.endswith("\n") or original_text.endswith("\r\n")
+            original_lines = original_text.splitlines()
         else:
-            if file_patch.hunks and file_patch.hunks[0].start_old != 0:
+            if file_patch.hunks and file_patch.hunks[0].start_old > 0:
                 raise PatchApplyError("cannot delete or modify non-existent file")
 
+        # handle deletions when new path is /dev/null (represented as delete flag on FilePatch)
+        if getattr(file_patch, "delete", False):
+            if exists:
+                target.unlink()
+                results.append(PatchResult(path=target, bytes_written=0, created=False))
+            continue
+
         new_lines = _apply_hunks(original_lines, file_patch.hunks)
-        content = _join_preserve_trailing(original_lines, new_lines)
+        content = _join_preserve_trailing(new_lines, had_trailing)
 
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as tmp:
@@ -96,13 +110,8 @@ def _apply_hunks(original: list[str], hunks: list[Hunk]) -> list[str]:
     return current
 
 
-def _join_preserve_trailing(original: Sequence[str], new_lines: Sequence[str]) -> str:
-    """Join lines preserving trailing newline if present in original."""
-
-    had_trailing = False
-    if original:
-        orig_text = "\n".join(original)
-        had_trailing = orig_text.endswith("\n") or orig_text.endswith("\r\n")
+def _join_preserve_trailing(new_lines: Sequence[str], had_trailing: bool) -> str:
+    """Join lines preserving trailing newline if present in original text."""
 
     text = "\n".join(new_lines)
     if had_trailing and new_lines:
