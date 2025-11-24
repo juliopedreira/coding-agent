@@ -88,6 +88,27 @@ async def test_includes_freeform_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_messages_are_filtered_from_payload() -> None:
+    transport = CapturingTransport(chunks=["data: [DONE]\n"])
+    client = OpenAIResponsesClient(transport)
+
+    request = ConversationRequest(
+        messages=[
+            Message(role=MessageRole.USER, content="hi"),
+            Message(role=MessageRole.TOOL, content='{"ok":true}', tool_call_id="tc1"),
+            Message(role=MessageRole.ASSISTANT, content="result: ok"),
+        ],
+        model="gpt-4.1-mini",
+    )
+
+    await anext(client.submit(request))
+
+    assert transport.last_payload is not None
+    roles = [item["role"] for item in transport.last_payload["input"]]
+    assert roles == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
 async def test_http_errors_are_mapped() -> None:
     transport = MockResponsesTransport([], status_code=401)
     client = OpenAIResponsesClient(transport)

@@ -109,30 +109,29 @@ class AgentRunner:
                 break
 
             tool_messages = self._execute_tools(tool_calls)
-            self.history.extend(tool_messages)
-            for msg in tool_messages:
-                self._record_event(Role.TOOL, msg.content, tool_name=msg.tool_call_id)
+            self.history.extend(msg for msg, _ in tool_messages)
+            for msg, call in tool_messages:
+                self._record_event(Role.TOOL, msg.content, tool_name=call.tool_call.name)
 
-            # Present tool outputs directly to the user and finish the turn.
-            assistant_reply = self._format_tool_outputs(tool_messages)
-            sys.stdout.write(assistant_reply + "\n")
-            sys.stdout.flush()
-            self.history.append(Message(role=MessageRole.ASSISTANT, content=assistant_reply))
-            self._record_event(Role.ASSISTANT, assistant_reply)
-            assistant_text += assistant_reply
-            break
+            # Present tool outputs directly and feed them back to the model as user context.
+            tool_text = self._format_tool_outputs([msg for msg, _ in tool_messages])
+            if tool_text:
+                self._safe_write(tool_text + "\n")
+                assistant_text += tool_text
+            for msg, call in tool_messages:
+                feedback = f"Tool {call.tool_call.name} output:\n{msg.content}"
+                feedback_msg = Message(role=MessageRole.USER, content=feedback)
+                self.history.append(feedback_msg)
+                self._record_event(Role.USER, feedback, tool_name=call.tool_call.name)
+            # loop continues to ask the model again with new context
 
         return assistant_text
 
     async def _invoke_model(self) -> tuple[str, list[_ToolCallBuffer]]:
-        reasoning_effort = None
-        if "mini" not in (self.settings.model or ""):
-            reasoning_effort = self.settings.reasoning_effort
-
         request = ConversationRequest(
             messages=self.history,
             model=self.settings.model,
-            reasoning_effort=reasoning_effort,
+            reasoning_effort=None,
             tools=_tool_definitions(),
         )
 
@@ -163,8 +162,7 @@ class AgentRunner:
         )
 
         if isinstance(event, TextDelta):
-            sys.stdout.write(event.text)
-            sys.stdout.flush()
+            self._safe_write(event.text)
             text_parts.append(event.text)
             return True
 
@@ -183,19 +181,18 @@ class AgentRunner:
 
         if isinstance(event, MessageDone):
             if text_parts:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+                self._safe_write("\n")
             return False
 
         if isinstance(event, ErrorEvent):  # pragma: no cover - defensive
-            sys.stdout.write(f"\n[error] {event.error}\n")
-            sys.stdout.flush()
+            cause = getattr(event.error, "__cause__", None)
+            self._safe_write(f"\n[error] {event.error!r} cause={cause!r}\n")
             return False
 
         return True
 
-    def _execute_tools(self, tool_calls: Iterable[_ToolCallBuffer]) -> list[Message]:
-        messages: list[Message] = []
+    def _execute_tools(self, tool_calls: Iterable[_ToolCallBuffer]) -> list[tuple[Message, _ToolCallBuffer]]:
+        messages: list[tuple[Message, _ToolCallBuffer]] = []
         for call in tool_calls:
             try:
                 args = json.loads(call.arguments) if call.arguments else {}
@@ -211,10 +208,13 @@ class AgentRunner:
 
             content = json.dumps(result, default=_json_default)
             messages.append(
-                Message(
-                    role=MessageRole.TOOL,
-                    content=content,
-                    tool_call_id=call.tool_call.id,
+                (
+                    Message(
+                        role=MessageRole.TOOL,
+                        content=content,
+                        tool_call_id=call.tool_call.id,
+                    ),
+                    call,
                 )
             )
         return messages
@@ -309,6 +309,14 @@ class AgentRunner:
         if not key:
             raise SystemExit("OPENAI_API_KEY not set and api_key missing in config")
         return key
+
+    @staticmethod
+    def _safe_write(text: str) -> None:
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            pass
 
 
 def _json_default(obj: Any) -> Any:

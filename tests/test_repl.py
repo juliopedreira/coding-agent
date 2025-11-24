@@ -108,8 +108,9 @@ def test_execute_tools_invalid_json(settings, tmp_path):
     runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
     bad_call = _ToolCallBuffer(tool_call=ToolCallPayload(id="x", name="list_dir", arguments=""), arguments="not-json")
     messages = runner._execute_tools([bad_call])
-    assert messages[0].role is not None
-    assert "invalid" in messages[0].content
+    first_msg, _ = messages[0]
+    assert first_msg.role is not None
+    assert "invalid" in first_msg.content
 
 
 def test_slash_commands_update_state(settings, monkeypatch, tmp_path):
@@ -149,4 +150,4 @@ def test_execute_tools_serializes_patch_result(settings, tmp_path):
     msgs = runner._execute_tools(
         [_ToolCallBuffer(tool_call=ToolCallPayload(id="p1", name="apply_patch_json", arguments="{}"), arguments="{}")]
     )
-    assert any("x.txt" in m.content for m in msgs)
+    assert any("x.txt" in m.content for m, _ in msgs)

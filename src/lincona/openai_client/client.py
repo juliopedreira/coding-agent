@@ -20,6 +20,7 @@ from lincona.openai_client.types import (
     ConversationRequest,
     ErrorEvent,
     Message,
+    MessageRole,
     ResponseEvent,
     StreamingParseError,
     ToolDefinition,
@@ -66,7 +67,9 @@ class OpenAIResponsesClient:
             err.__cause__ = exc
             yield ErrorEvent(error=err)
         except httpx.HTTPStatusError as exc:
-            yield ErrorEvent(error=_map_status_error(exc))
+            mapped = _map_status_error(exc)
+            mapped.__cause__ = exc
+            yield ErrorEvent(error=mapped)
         except httpx.RequestError as exc:
             err = ApiClientError("request failed")
             err.__cause__ = exc
@@ -85,7 +88,7 @@ class OpenAIResponsesClient:
         if not model:
             raise ApiClientError("model is required")
 
-        inputs = [_message_to_content(msg) for msg in request.messages]
+        inputs = [_message_to_content(msg) for msg in request.messages if _message_to_content(msg) is not None]
         tools = [_tool_to_dict(tool) for tool in request.tools]
 
         payload: dict[str, Any] = {
@@ -118,7 +121,9 @@ class OpenAIResponsesClient:
         return payload
 
 
-def _message_to_content(message: Message) -> dict[str, Any]:
+def _message_to_content(message: Message) -> dict[str, Any] | None:
+    if message.role is MessageRole.TOOL:
+        return None
     data = {"role": message.role.value, "content": message.content}
     if message.tool_call_id:
         data["tool_call_id"] = message.tool_call_id
@@ -129,9 +134,8 @@ def _tool_to_dict(tool: ToolSpecification) -> dict[str, Any]:
     if isinstance(tool, ToolDefinition):
         parameters = dict(tool.parameters)
         props = parameters.get("properties") or {}
-        if isinstance(props, dict):
+        if isinstance(props, dict) and "required" not in parameters:
             parameters["required"] = list(props.keys())
-        parameters.setdefault("additionalProperties", False)
         return {
             "type": "function",
             "name": tool.name,
@@ -158,17 +162,19 @@ def _tool_to_dict(tool: ToolSpecification) -> dict[str, Any]:
 
 def _map_status_error(exc: httpx.HTTPStatusError) -> ApiError:
     status = exc.response.status_code
+    body = exc.response.text if exc.response is not None else ""
+    suffix = f" body={body}" if body else ""
     retry_after = exc.response.headers.get("retry-after")
     retry_suffix = ""
     if retry_after:
         retry_suffix = f" (retry after {retry_after}s)"
     if status in (401, 403):
-        return ApiAuthError(f"auth failed with status {status}")
+        return ApiAuthError(f"auth failed with status {status}{suffix}")
     if status == 429:
-        return ApiRateLimitError(f"rate limited{retry_suffix}")
+        return ApiRateLimitError(f"rate limited{retry_suffix}{suffix}")
     if status >= 500:
-        return ApiServerError(f"server error {status}")
-    return ApiClientError(f"request failed with status {status}")
+        return ApiServerError(f"server error {status}{suffix}")
+    return ApiClientError(f"request failed with status {status}{suffix}")
 
 
 __all__ = ["OpenAIResponsesClient", "_map_status_error"]

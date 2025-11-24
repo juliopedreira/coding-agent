@@ -144,7 +144,12 @@ class OpenAISDKResponsesTransport:
         extra_headers = {"OpenAI-Beta": self._beta_header} if self._beta_header else None
         request_payload = dict(payload)
         request_payload.pop("stream", None)
-        stream = await self._client.responses.create(stream=True, extra_headers=extra_headers, **request_payload)
+        try:
+            stream = await self._client.responses.create(stream=True, extra_headers=extra_headers, **request_payload)
+        except httpx.HTTPStatusError as exc:
+            # Surface the error body to aid debugging
+            text = exc.response.text if exc.response is not None else ""
+            raise httpx.HTTPStatusError(f"{exc} body={text}", request=exc.request, response=exc.response) from exc
 
         async for event in stream:
             json_payload = _map_openai_event(event)
