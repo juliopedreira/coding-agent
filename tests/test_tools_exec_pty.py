@@ -42,6 +42,7 @@ def test_truncation_in_pty(tmp_path: Path) -> None:
     result = manager.exec_command("s3", "printf '1234567890abcd'")
 
     assert result["truncated"] is True
+    assert result["output"].endswith("[truncated]")
 
 
 def test_close_all_clears_sessions(tmp_path: Path) -> None:

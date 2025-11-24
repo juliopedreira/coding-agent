@@ -26,6 +26,7 @@ class PtyManager:
         self.sessions: dict[str, PtySession] = {}
         self.max_bytes = max_bytes
         self.max_lines = max_lines
+        self._cumulative: dict[str, int] = {}
 
     def exec_command(self, session_id: str, cmd: str, workdir: str | Path | None = None) -> dict[str, object]:
         cwd = self.boundary.sanitize_workdir(workdir)
@@ -41,6 +42,7 @@ class PtyManager:
         )
         os.close(slave_fd)
         self.sessions[session_id] = PtySession(pid=proc.pid, fd=master_fd, cwd=cwd)
+        self._cumulative[session_id] = 0
         return self._read(session_id)
 
     def write_stdin(self, session_id: str, chars: str) -> dict[str, object]:
@@ -53,6 +55,7 @@ class PtyManager:
         session = self.sessions.pop(session_id, None)
         if session:
             os.close(session.fd)
+            self._cumulative.pop(session_id, None)
 
     def close_all(self) -> None:
         """Close all tracked PTY sessions."""
@@ -75,11 +78,19 @@ class PtyManager:
             if not chunk:
                 break
             out += chunk
+            self._cumulative[session_id] = self._cumulative.get(session_id, 0) + len(chunk)
             if len(out) >= self.max_bytes:
                 break
 
         text = out.decode(errors="ignore")
         truncated_text, truncated = truncate_output(text, max_bytes=self.max_bytes, max_lines=self.max_lines)
+        cumulative = self._cumulative.get(session_id, 0)
+        if truncated or cumulative > self.max_bytes:
+            truncated = True
+            if not truncated_text.endswith("[truncated]"):
+                if not truncated_text.endswith("\n"):
+                    truncated_text += "\n"
+                truncated_text += "[truncated]"
         return {"output": truncated_text, "truncated": truncated}
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,9 +43,12 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
             if target.is_dir():
                 raise PatchApplyError(f"target {target} is a directory")
             original_lines = target.read_text(encoding="utf-8").splitlines()
+        else:
+            if file_patch.hunks and file_patch.hunks[0].start_old != 0:
+                raise PatchApplyError("cannot delete or modify non-existent file")
 
         new_lines = _apply_hunks(original_lines, file_patch.hunks)
-        content = "\n".join(new_lines)
+        content = _join_preserve_trailing(original_lines, new_lines)
 
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as tmp:
@@ -90,6 +94,21 @@ def _apply_hunks(original: list[str], hunks: list[Hunk]) -> list[str]:
         current = pre + new_chunk + post
 
     return current
+
+
+def _join_preserve_trailing(original: Sequence[str], new_lines: Sequence[str]) -> str:
+    """Join lines preserving trailing newline if present in original."""
+
+    had_trailing = False
+    if original:
+        orig_text = "\n".join(original)
+        had_trailing = orig_text.endswith("\n") or orig_text.endswith("\r\n")
+
+    text = "\n".join(new_lines)
+    if had_trailing and new_lines:
+        if not text.endswith("\n"):
+            text += "\n"
+    return text
 
 
 __all__ = ["apply_patch", "PatchApplyError", "PatchResult"]
