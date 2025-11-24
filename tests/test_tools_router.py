@@ -79,6 +79,7 @@ def test_dispatch_apply_patch_json(tmp_path):
     router.dispatch("apply_patch_json", patch=patch)
 
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hi"
+    assert router.events[-1]["files"] == 1
 
 
 def test_dispatch_unknown_tool_raises(tmp_path):
@@ -95,3 +96,4 @@ def test_dispatch_write_stdin(tmp_path):
     router.dispatch("exec_command", session_id="s2", cmd="cat")
     result = router.dispatch("write_stdin", session_id="s2", chars="ping\n")
     assert "ping" in result["output"]
+    assert any(e for e in router.events if e["tool"] == "write_stdin" and e["phase"] == "end")

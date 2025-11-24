@@ -161,8 +161,10 @@ class ToolRouter:
             register = getattr(shutdown_manager, "register_pty_manager", None)
             if callable(register):
                 register(self.pty_manager)
+        self.events: list[dict[str, Any]] = []
 
     def dispatch(self, name: str, **kwargs: Any) -> Any:
+        self._emit_event("start", name, kwargs)
         if name == "list_dir":
             return list_dir(self.boundary, **kwargs)
         if name == "read_file":
@@ -171,23 +173,40 @@ class ToolRouter:
             return grep_files(self.boundary, **kwargs)
         if name == "apply_patch_json":
             self._check_approval(name)
-            return apply_patch(self.boundary, kwargs["patch"])
+            patch_results = apply_patch(self.boundary, kwargs["patch"])
+            self._emit_event("end", name, {"files": len(patch_results)})
+            return patch_results
         if name == "apply_patch_freeform":
             self._check_approval(name)
-            return apply_patch(self.boundary, kwargs["patch"], freeform=True)
+            patch_results = apply_patch(self.boundary, kwargs["patch"], freeform=True)
+            self._emit_event("end", name, {"files": len(patch_results)})
+            return patch_results
         if name == "shell":
             self._check_approval(name)
-            return run_shell(self.boundary, **kwargs)
+            result = run_shell(self.boundary, **kwargs)
+            self._emit_event("end", name, {"returncode": result.get("returncode"), "timeout": result.get("timeout")})
+            return result
         if name == "exec_command":
             self._check_approval(name)
-            return self.pty_manager.exec_command(**kwargs)
+            result = self.pty_manager.exec_command(**kwargs)
+            self._emit_event(
+                "end", name, {"session_id": kwargs.get("session_id"), "truncated": result.get("truncated")}
+            )
+            return result
         if name == "write_stdin":
             self._check_approval(name)
-            return self.pty_manager.write_stdin(**kwargs)
+            result = self.pty_manager.write_stdin(**kwargs)
+            self._emit_event(
+                "end", name, {"session_id": kwargs.get("session_id"), "truncated": result.get("truncated")}
+            )
+            return result
         raise ValueError(f"unknown tool {name}")
 
     def _check_approval(self, tool_name: str) -> None:
         approval_guard(self.approval_policy, tool_name)
+
+    def _emit_event(self, phase: str, tool_name: str, data: dict[str, Any]) -> None:
+        self.events.append({"phase": phase, "tool": tool_name, **data})
 
 
 __all__ = ["tool_specs", "ToolRouter", "ApprovalRequiredError"]
