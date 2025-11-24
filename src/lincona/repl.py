@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, is_dataclass
@@ -316,7 +317,8 @@ class AgentRunner:
             sys.stdout.write(text)
             sys.stdout.flush()
         except BrokenPipeError:
-            pass
+            # Gracefully exit when stdout consumer closes (e.g., piped/timeout).
+            os._exit(0)
 
 
 def _json_default(obj: Any) -> Any:
