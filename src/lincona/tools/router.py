@@ -1,0 +1,140 @@
+"""Tool router exposing specs and dispatch for OpenAI tooling."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from lincona.config import ApprovalPolicy
+from lincona.tools.apply_patch import apply_patch
+from lincona.tools.approval import ApprovalRequiredError, approval_guard
+from lincona.tools.exec_pty import PtyManager
+from lincona.tools.fs import FsBoundary
+from lincona.tools.grep_files import grep_files
+from lincona.tools.list_dir import list_dir
+from lincona.tools.read_file import read_file
+from lincona.tools.shell import run_shell
+
+
+def tool_specs() -> list[dict[str, Any]]:
+    """Return JSON tool specs (minimal) plus freeform apply_patch descriptor."""
+
+    specs: list[dict[str, Any]] = [
+        {
+            "type": "function",
+            "function": {
+                "name": "list_dir",
+                "description": "List directory entries up to depth",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read file slice with optional indentation mode",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "grep_files",
+                "description": "Recursive regex search with include globs",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "apply_patch_json",
+                "description": "Apply unified diff",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "apply_patch_freeform",
+                "description": "Apply patch using freeform envelope",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "shell",
+                "description": "Run a shell command",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "description": "Run a PTY-backed long command",
+                "parameters": {"type": "object"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_stdin",
+                "description": "Send input to existing PTY session",
+                "parameters": {"type": "object"},
+            },
+        },
+        # freeform apply_patch
+        {
+            "type": "function",
+            "function": {
+                "name": "apply_patch_freeform",
+                "description": "Apply patch using freeform tool calls.",
+                "parameters": {"type": "object"},
+            },
+        },
+    ]
+    return specs
+
+
+class ToolRouter:
+    """Dispatch tool calls with boundary and approval enforcement."""
+
+    def __init__(
+        self,
+        boundary: FsBoundary,
+        approval_policy: ApprovalPolicy,
+        pty_manager: PtyManager | None = None,
+    ) -> None:
+        self.boundary = boundary
+        self.approval_policy = approval_policy
+        self.pty_manager = pty_manager or PtyManager(boundary)
+
+    def dispatch(self, name: str, **kwargs: Any) -> Any:
+        if name == "list_dir":
+            return list_dir(self.boundary, **kwargs)
+        if name == "read_file":
+            return read_file(self.boundary, **kwargs)
+        if name == "grep_files":
+            return grep_files(self.boundary, **kwargs)
+        if name == "apply_patch_json":
+            self._check_approval(name)
+            return apply_patch(self.boundary, kwargs["patch"])
+        if name == "apply_patch_freeform":
+            self._check_approval(name)
+            return apply_patch(self.boundary, kwargs["patch"], freeform=True)
+        if name == "shell":
+            self._check_approval(name)
+            return run_shell(self.boundary, **kwargs)
+        if name == "exec_command":
+            self._check_approval(name)
+            return self.pty_manager.exec_command(**kwargs)
+        if name == "write_stdin":
+            self._check_approval(name)
+            return self.pty_manager.write_stdin(**kwargs)
+        raise ValueError(f"unknown tool {name}")
+
+    def _check_approval(self, tool_name: str) -> None:
+        approval_guard(self.approval_policy, tool_name)
+
+
+__all__ = ["tool_specs", "ToolRouter", "ApprovalRequiredError"]
