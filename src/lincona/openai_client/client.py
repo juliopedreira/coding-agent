@@ -85,12 +85,12 @@ class OpenAIResponsesClient:
         if not model:
             raise ApiClientError("model is required")
 
-        messages = [_message_to_dict(msg) for msg in request.messages]
+        inputs = [_message_to_content(msg) for msg in request.messages]
         tools = [_tool_to_dict(tool) for tool in request.tools]
 
         payload: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "input": inputs,
             "stream": True,
         }
 
@@ -118,7 +118,7 @@ class OpenAIResponsesClient:
         return payload
 
 
-def _message_to_dict(message: Message) -> dict[str, Any]:
+def _message_to_content(message: Message) -> dict[str, Any]:
     data = {"role": message.role.value, "content": message.content}
     if message.tool_call_id:
         data["tool_call_id"] = message.tool_call_id
@@ -127,26 +127,31 @@ def _message_to_dict(message: Message) -> dict[str, Any]:
 
 def _tool_to_dict(tool: ToolSpecification) -> dict[str, Any]:
     if isinstance(tool, ToolDefinition):
+        parameters = dict(tool.parameters)
+        props = parameters.get("properties") or {}
+        if isinstance(props, dict):
+            parameters["required"] = list(props.keys())
+        parameters.setdefault("additionalProperties", False)
         return {
             "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parameters,
+            "strict": True,
         }
     if isinstance(tool, ApplyPatchFreeform):
+        parameters = {
+            "type": "object",
+            "properties": {"patch": {"type": "string"}},
+            "required": ["patch"],
+            "additionalProperties": False,
+        }
         return {
             "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {"patch": {"type": "string"}},
-                    "required": ["patch"],
-                },
-            },
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parameters,
+            "strict": True,
         }
     raise TypeError(f"Unsupported tool specification: {tool!r}")
 

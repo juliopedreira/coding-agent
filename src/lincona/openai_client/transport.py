@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 import httpx
+from openai import AsyncOpenAI
 
 
 class ResponsesTransport(Protocol):
@@ -30,7 +32,7 @@ class HttpResponsesTransport:
         timeout: httpx.Timeout | float | None = None,
         client: httpx.AsyncClient | None = None,
         user_agent: str | None = "lincona/0.1.0",
-        beta_header: str | None = "responses-2024-10-01",
+        beta_header: str | None = "responses=v1",
         logger: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
         if not api_key.strip():
@@ -114,4 +116,90 @@ class MockResponsesTransport:
             )
 
 
-__all__ = ["ResponsesTransport", "HttpResponsesTransport", "MockResponsesTransport"]
+class OpenAISDKResponsesTransport:
+    """Transport backed by the official openai Python SDK (Responses API)."""
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+        organization: str | None = None,
+        project: str | None = None,
+        beta_header: str | None = "responses=v1",
+        client: Any | None = None,
+    ) -> None:
+        if not api_key.strip():
+            raise ValueError("api_key cannot be empty")
+
+        self._beta_header = beta_header
+        self._client = client or AsyncOpenAI(
+            api_key=api_key.strip(),
+            base_url=base_url,
+            organization=organization,
+            project=project,
+        )
+
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str | bytes]:
+        extra_headers = {"OpenAI-Beta": self._beta_header} if self._beta_header else None
+        request_payload = dict(payload)
+        request_payload.pop("stream", None)
+        stream = await self._client.responses.create(stream=True, extra_headers=extra_headers, **request_payload)
+
+        async for event in stream:
+            json_payload = _map_openai_event(event)
+            if json_payload is None:
+                continue
+            yield json.dumps(json_payload)
+
+
+def _map_openai_event(event: Any) -> dict[str, Any] | None:
+    """Convert SDK response events into the internal JSON payloads parse_stream expects."""
+
+    event_type = getattr(event, "type", "")
+
+    if event_type == "response.output_text.delta":
+        delta = getattr(event, "delta", None)
+        if isinstance(delta, str):
+            return {"type": "text_delta", "delta": {"text": delta}}
+        return None
+
+    if event_type == "response.output_item.added":
+        item = getattr(event, "item", None)
+        if item and getattr(item, "type", None) == "function_call":
+            call_id = getattr(item, "call_id", None) or getattr(item, "id", None)
+            name = getattr(item, "name", None)
+            arguments = getattr(item, "arguments", "") or ""
+            if call_id and name:
+                return {"type": "tool_call_start", "delta": {"id": call_id, "name": name, "arguments": arguments}}
+        return None
+
+    if event_type == "response.function_call_arguments.delta":
+        call_id = getattr(event, "item_id", None) or getattr(event, "call_id", None)
+        arguments_delta = getattr(event, "delta", None)
+        name = getattr(event, "name", None)
+        if call_id and isinstance(arguments_delta, str):
+            delta_payload: dict[str, Any] = {"id": call_id, "arguments_delta": arguments_delta}
+            if isinstance(name, str):
+                delta_payload["name"] = name
+            return {"type": "tool_call_delta", "delta": delta_payload}
+        return None
+
+    if event_type == "response.function_call_arguments.done":
+        call_id = getattr(event, "item_id", None) or getattr(event, "call_id", None)
+        arguments = getattr(event, "arguments", None)
+        name = getattr(event, "name", None)
+        if call_id and isinstance(arguments, str):
+            end_payload: dict[str, Any] = {"id": call_id, "arguments": arguments}
+            if isinstance(name, str):
+                end_payload["name"] = name
+            return {"type": "tool_call_end", "delta": end_payload}
+        return None
+
+    if event_type == "response.completed":
+        return {"type": "response.done"}
+
+    return None
+
+
+__all__ = ["ResponsesTransport", "HttpResponsesTransport", "MockResponsesTransport", "OpenAISDKResponsesTransport"]

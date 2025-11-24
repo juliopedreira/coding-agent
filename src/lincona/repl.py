@@ -12,8 +12,8 @@ from typing import Any, cast
 
 from lincona.config import ApprovalPolicy, FsMode, Settings
 from lincona.logging import configure_session_logger
-from lincona.openai_client import HttpResponsesTransport, OpenAIResponsesClient
-from lincona.openai_client.transport import ResponsesTransport
+from lincona.openai_client import OpenAIResponsesClient
+from lincona.openai_client.transport import OpenAISDKResponsesTransport, ResponsesTransport
 from lincona.openai_client.types import (
     ApplyPatchFreeform,
     ConversationRequest,
@@ -64,12 +64,12 @@ class AgentRunner:
         self.router = ToolRouter(self.boundary, self.approval_policy, shutdown_manager=shutdown_manager)
 
         transport_instance = cast(
-            ResponsesTransport, transport or HttpResponsesTransport(api_key=self._require_api_key())
+            ResponsesTransport, transport or OpenAISDKResponsesTransport(api_key=self._require_api_key())
         )
         self.client = OpenAIResponsesClient(
             transport_instance,
             default_model=settings.model,
-            default_reasoning_effort=settings.reasoning_effort.value,
+            default_reasoning_effort=None,
         )
 
         self.history: list[Message] = []
@@ -116,10 +116,14 @@ class AgentRunner:
         return assistant_text
 
     async def _invoke_model(self) -> tuple[str, list[_ToolCallBuffer]]:
+        reasoning_effort = None
+        if "mini" not in (self.settings.model or ""):
+            reasoning_effort = self.settings.reasoning_effort
+
         request = ConversationRequest(
             messages=self.history,
             model=self.settings.model,
-            reasoning_effort=self.settings.reasoning_effort,
+            reasoning_effort=reasoning_effort,
             tools=_tool_definitions(),
         )
 

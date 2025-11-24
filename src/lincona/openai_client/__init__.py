@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from .client import OpenAIResponsesClient  # noqa: F401
 from .parsing import DEFAULT_MAX_TOOL_BUFFER_BYTES, parse_stream  # noqa: F401
-from .transport import HttpResponsesTransport, MockResponsesTransport, ResponsesTransport  # noqa: F401
+from .transport import (  # noqa: F401
+    HttpResponsesTransport,
+    MockResponsesTransport,
+    OpenAISDKResponsesTransport,
+    ResponsesTransport,
+)
 from .types import (  # noqa: F401
     ApiAuthError,
     ApiClientError,

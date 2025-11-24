@@ -59,8 +59,8 @@ async def test_builds_payload_and_streams_events() -> None:
     assert transport.last_payload is not None
     payload = transport.last_payload
     assert payload["model"] == "gpt-4.1"
-    assert payload["messages"][0] == {"role": "user", "content": "hi"}
-    assert payload["tools"][0]["function"]["name"] == "list_dir"
+    assert payload["input"][0] == {"role": "user", "content": "hi"}
+    assert payload["tools"][0]["name"] == "list_dir"
     assert payload["reasoning"] == {"effort": "low"}
     assert payload["max_output_tokens"] == 128
     assert payload["metadata"] == {"session_id": "abc"}
@@ -83,8 +83,8 @@ async def test_includes_freeform_tool() -> None:
 
     assert transport.last_payload is not None
     tool_payload = transport.last_payload["tools"][0]
-    assert tool_payload["function"]["name"] == "apply_patch_freeform"
-    assert "patch" in tool_payload["function"]["parameters"]["properties"]
+    assert tool_payload["name"] == "apply_patch_freeform"
+    assert "patch" in tool_payload["parameters"]["properties"]
 
 
 @pytest.mark.asyncio
