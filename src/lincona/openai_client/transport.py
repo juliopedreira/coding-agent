@@ -45,7 +45,7 @@ class HttpResponsesTransport:
         self._beta_header = beta_header
         self._logger = logger
 
-    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str | bytes]:
         url = f"{self.base_url}/responses"
         headers = {
             "Authorization": f"Bearer {self.api_key}",

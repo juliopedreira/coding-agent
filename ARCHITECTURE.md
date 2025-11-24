@@ -25,7 +25,7 @@ High-level view of the current codebase (Epics 1–4 complete; Conversation/TUI/
 - Shutdown integration: `ShutdownManager.register_pty_manager` closes PTY sessions on exit.
 
 ## CLI entry
-- `src/lincona/cli.py`: placeholder CLI stub (TUI/tooling to be added in later epics).
+- `src/lincona/cli.py`: console entry with chat REPL, tool invocations, sessions/config helpers, and debug logging flag.
 
 ## Data layout (default `~/.lincona/`)
 - `config.toml`

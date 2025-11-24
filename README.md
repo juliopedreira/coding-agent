@@ -40,8 +40,11 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 
 ## Quick start
 - Show version: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona --version`
-- Run the placeholder CLI: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona`
-  - Currently prints a stub message; real TUI/commands arrive in later epics.
+- Start chat REPL (default): `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona chat`
+  - Set `OPENAI_API_KEY` in your environment.
+  - Slash commands: `/help`, `/newsession`, `/model <id>`, `/reasoning <low|medium|high>`, `/approvals <never|on-request|always>`, `/fsmode <restricted|unrestricted>`, `/quit`.
+- Run a tool directly: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona tool list_dir --arg path=. --arg depth=1`
+- Inspect sessions: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona sessions list`
 
 ## Configuration & data directories
 - Base directory: `~/.lincona/` (override with env `LINCONA_HOME=/custom/path`).
