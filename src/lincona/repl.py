@@ -6,7 +6,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -113,6 +113,15 @@ class AgentRunner:
             for msg in tool_messages:
                 self._record_event(Role.TOOL, msg.content, tool_name=msg.tool_call_id)
 
+            # Present tool outputs directly to the user and finish the turn.
+            assistant_reply = self._format_tool_outputs(tool_messages)
+            sys.stdout.write(assistant_reply + "\n")
+            sys.stdout.flush()
+            self.history.append(Message(role=MessageRole.ASSISTANT, content=assistant_reply))
+            self._record_event(Role.ASSISTANT, assistant_reply)
+            assistant_text += assistant_reply
+            break
+
         return assistant_text
 
     async def _invoke_model(self) -> tuple[str, list[_ToolCallBuffer]]:
@@ -200,7 +209,7 @@ class AgentRunner:
                 except Exception as exc:  # pragma: no cover - tool errors surfaced to user
                     result = {"error": str(exc)}
 
-            content = json.dumps(result)
+            content = json.dumps(result, default=_json_default)
             messages.append(
                 Message(
                     role=MessageRole.TOOL,
@@ -277,6 +286,13 @@ class AgentRunner:
         self.writer.append(event)
 
     @staticmethod
+    def _format_tool_outputs(messages: list[Message]) -> str:
+        parts = []
+        for msg in messages:
+            parts.append(msg.content)
+        return "\n".join(parts)
+
+    @staticmethod
     def _uuid() -> Any:
         from uuid import uuid4
 
@@ -293,6 +309,18 @@ class AgentRunner:
         if not key:
             raise SystemExit("OPENAI_API_KEY not set and api_key missing in config")
         return key
+
+
+def _json_default(obj: Any) -> Any:
+    """Best-effort conversion for dataclasses/Path/etc. used in tool outputs."""
+
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {k: _json_default(v) for k, v in asdict(obj).items()}
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, bytes):
+        return obj.decode(errors="ignore")
+    return str(obj)
 
 
 def _tool_definitions() -> list[ToolDefinition | ApplyPatchFreeform]:

@@ -6,6 +6,7 @@ import pytest
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings
 from lincona.openai_client.types import ToolCallPayload
 from lincona.repl import AgentRunner, _ToolCallBuffer
+from lincona.tools.apply_patch import PatchResult
 from lincona.tools.router import ToolRouter
 
 
@@ -91,7 +92,7 @@ def test_run_turn_tool_call(settings, monkeypatch, tmp_path):
     runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
     runner.router = StubRouter()  # type: ignore[assignment]
     text = asyncio.run(runner.run_turn("use tool"))
-    assert text == "done"
+    assert '"ok": true' in text
     assert calls["name"] == "list_dir"
     assert calls["kwargs"]["path"] == "."
 
@@ -127,3 +128,25 @@ def test_slash_commands_update_state(settings, monkeypatch, tmp_path):
 
     asyncio.run(runner._handle_slash("/fsmode unrestricted"))
     assert runner.fs_mode == FsMode.UNRESTRICTED
+
+
+def test_execute_tools_serializes_patch_result(settings, tmp_path):
+    transport = SequenceTransport(
+        [
+            [
+                'data: {"type":"response.done"}',
+            ]
+        ]
+    )
+    runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
+
+    # replace router dispatch to return a dataclass result
+    class DataclassRouter:
+        def dispatch(self, name: str, **kwargs):
+            return PatchResult(path=tmp_path / "x.txt", bytes_written=4, created=True)
+
+    runner.router = DataclassRouter()  # type: ignore[assignment]
+    msgs = runner._execute_tools(
+        [_ToolCallBuffer(tool_call=ToolCallPayload(id="p1", name="apply_patch_json", arguments="{}"), arguments="{}")]
+    )
+    assert any("x.txt" in m.content for m in msgs)

@@ -167,7 +167,7 @@ def _map_openai_event(event: Any) -> dict[str, Any] | None:
     if event_type == "response.output_item.added":
         item = getattr(event, "item", None)
         if item and getattr(item, "type", None) == "function_call":
-            call_id = getattr(item, "call_id", None) or getattr(item, "id", None)
+            call_id = getattr(item, "id", None) or getattr(item, "call_id", None)
             name = getattr(item, "name", None)
             arguments = getattr(item, "arguments", "") or ""
             if call_id and name:
