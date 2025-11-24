@@ -20,6 +20,7 @@ class ShutdownManager:
 
     def __init__(self, *, install_hooks: bool = True) -> None:
         self._callbacks: list[Callable[[], None]] = []
+        self._pty_closers: list[Callable[[], None]] = []
         self._ran = False
         self._logger = logging.getLogger("lincona.shutdown")
         self._old_handlers: dict[int, Any] = {}
@@ -52,6 +53,16 @@ class ShutdownManager:
                 logger.removeHandler(handler)
 
         self.register(_close_handlers)
+
+    def register_pty_manager(self, manager: Any) -> None:
+        """Register a PTY manager that exposes close_all()."""
+
+        def _close() -> None:
+            close_all = getattr(manager, "close_all", None)
+            if callable(close_all):
+                close_all()
+
+        self.register(_close)
 
     def register_resources(
         self,

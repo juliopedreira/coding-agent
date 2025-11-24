@@ -104,3 +104,17 @@ def test_register_resources_combines(tmp_path: Path):
 
     assert writer._closed is True  # type: ignore[attr-defined]
     assert logger.handlers == []
+
+
+def test_register_pty_manager_calls_close_all() -> None:
+    closed = []
+
+    class DummyPty:
+        def close_all(self) -> None:
+            closed.append("yes")
+
+    mgr = ShutdownManager(install_hooks=False)
+    mgr.register_pty_manager(DummyPty())
+    mgr.run()
+
+    assert closed == ["yes"]

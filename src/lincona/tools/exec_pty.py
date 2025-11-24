@@ -54,6 +54,12 @@ class PtyManager:
         if session:
             os.close(session.fd)
 
+    def close_all(self) -> None:
+        """Close all tracked PTY sessions."""
+
+        for sid in list(self.sessions.keys()):
+            self.close(sid)
+
     def _read(self, session_id: str) -> dict[str, object]:
         session = self.sessions[session_id]
         fd = session.fd
