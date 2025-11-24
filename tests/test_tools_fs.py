@@ -46,6 +46,20 @@ def test_sanitize_workdir_absolute_in_restricted() -> None:
     assert workdir == Path("/tmp/root/sub")
 
 
+def test_symlink_escape_is_blocked(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = root / "link"
+    link.symlink_to(outside)
+
+    boundary = FsBoundary(FsMode.RESTRICTED, root=root)
+
+    with pytest.raises(FsViolationError):
+        boundary.sanitize_path(link / "file.txt")
+
+
 def test_assert_within_root_unrestricted_noop() -> None:
     boundary = FsBoundary(FsMode.UNRESTRICTED)
     boundary.assert_within_root(Path("/etc/hosts"))  # should not raise

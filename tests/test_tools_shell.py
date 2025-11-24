@@ -30,3 +30,11 @@ def test_shell_truncation(tmp_path: Path) -> None:
 
     assert result["stdout_truncated"] is True
     assert result["stdout"].endswith("[truncated]")
+
+
+def test_shell_non_zero_exit(tmp_path: Path) -> None:
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    result = run_shell(boundary, "bash -c 'echo err 1>&2; exit 7'")
+
+    assert result["returncode"] == 7
+    assert "err" in result["stderr"]

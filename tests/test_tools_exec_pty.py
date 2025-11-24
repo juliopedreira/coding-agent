@@ -42,3 +42,12 @@ def test_truncation_in_pty(tmp_path: Path) -> None:
     result = manager.exec_command("s3", "printf '1234567890abcd'")
 
     assert result["truncated"] is True
+
+
+def test_close_all_clears_sessions(tmp_path: Path) -> None:
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    manager = PtyManager(boundary)
+    manager.exec_command("s4", "echo hi", workdir=tmp_path)
+    assert "s4" in manager.sessions
+    manager.close_all()
+    assert manager.sessions == {}
