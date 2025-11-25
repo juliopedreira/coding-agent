@@ -125,7 +125,13 @@ class PtyManager:
 class ExecCommandInput(ToolRequest):
     session_id: str = Field(description="Opaque PTY session identifier.")
     cmd: str = Field(description="Command to execute in PTY.")
-    workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
+    workdir: str | None = Field(default=None, description="Working directory (optional).")
+
+    @classmethod
+    def model_validate(cls, value: object) -> ExecCommandInput:  # type: ignore[override]
+        if isinstance(value, dict) and isinstance(value.get("workdir"), Path):
+            value = {**value, "workdir": str(value["workdir"])}
+        return super().model_validate(value)
 
 
 class ExecCommandOutput(ToolResponse):

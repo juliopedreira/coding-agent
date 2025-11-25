@@ -64,8 +64,14 @@ def run_shell(
 
 class ShellInput(ToolRequest):
     command: str = Field(description="Shell command to run.")
-    workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
+    workdir: str | None = Field(default=None, description="Working directory (optional).")
     timeout_ms: int = Field(default=60000, ge=1, description="Timeout in milliseconds.")
+
+    @classmethod
+    def model_validate(cls, value: object) -> ShellInput:  # type: ignore[override]
+        if isinstance(value, dict) and isinstance(value.get("workdir"), Path):
+            value = {**value, "workdir": str(value["workdir"])}
+        return super().model_validate(value)
 
 
 class ShellOutput(ToolResponse):
