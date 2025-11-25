@@ -175,9 +175,17 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
     manager = pty_manager or PtyManager(boundary)
 
     def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
+        session_id = getattr(validated, "session_id", None)
+        if not isinstance(session_id, str):
+            return {"session_id": None, "truncated": getattr(output, "truncated", None), "returncode": None}
         return {
-            "session_id": getattr(validated, "session_id", None),
+            "session_id": session_id,
             "truncated": getattr(output, "truncated", None),
+            "returncode": getattr(
+                getattr(manager.sessions.get(session_id, None), "proc", None),
+                "returncode",
+                None,
+            ),
         }
 
     exec_tool = ExecTool(manager)
@@ -192,6 +200,7 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
             handler=cast(Callable[[ToolRequest], ToolResponse], exec_tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
+            result_adapter=lambda out: cast(ExecCommandOutput, out).model_dump(),
         ),
         ToolRegistration(
             name="write_stdin",
@@ -201,6 +210,7 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
             handler=cast(Callable[[ToolRequest], ToolResponse], write_tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
+            result_adapter=lambda out: cast(WriteStdinOutput, out).model_dump(),
         ),
     ]
 

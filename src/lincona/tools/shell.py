@@ -109,6 +109,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
+            result_adapter=lambda out: cast(ShellOutput, out).model_dump(),
         )
     ]
 
