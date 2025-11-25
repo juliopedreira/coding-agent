@@ -26,6 +26,20 @@ class ReadFileOutput(ToolResponse):
     truncated: bool = Field(description="True when not all lines were returned.")
 
 
+class ReadFileTool(Tool[ReadFileInput, ReadFileOutput]):
+    name = "read_file"
+    description = "Read file slice with optional indentation mode"
+    InputModel = ReadFileInput
+    OutputModel = ReadFileOutput
+
+    def __init__(self, boundary: FsBoundary) -> None:
+        self.boundary = boundary
+
+    def execute(self, request: ReadFileInput) -> ReadFileOutput:
+        text, truncated = read_file(self.boundary, **request.model_dump())
+        return ReadFileOutput(text=text, truncated=truncated)
+
+
 def read_file(
     boundary: FsBoundary,
     path: str | Path,
@@ -66,19 +80,6 @@ def read_file(
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    class ReadFileTool(Tool[ReadFileInput, ReadFileOutput]):
-        name = "read_file"
-        description = "Read file slice with optional indentation mode"
-        InputModel = ReadFileInput
-        OutputModel = ReadFileOutput
-
-        def __init__(self, boundary: FsBoundary) -> None:
-            self.boundary = boundary
-
-        def execute(self, request: ReadFileInput) -> ReadFileOutput:
-            text, truncated = read_file(self.boundary, **request.model_dump())
-            return ReadFileOutput(text=text, truncated=truncated)
-
     tool = ReadFileTool(boundary)
 
     return [

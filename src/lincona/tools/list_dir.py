@@ -25,6 +25,20 @@ class ListDirOutput(ToolResponse):
     entries: list[str] = Field(description="Directory entries with markers (/ for dir, @ for symlink).")
 
 
+class ListDirTool(Tool[ListDirInput, ListDirOutput]):
+    name = "list_dir"
+    description = "List directory entries up to depth"
+    InputModel = ListDirInput
+    OutputModel = ListDirOutput
+
+    def __init__(self, boundary: FsBoundary) -> None:
+        self.boundary = boundary
+
+    def execute(self, request: ListDirInput) -> ListDirOutput:
+        entries = list_dir(self.boundary, **request.model_dump())
+        return ListDirOutput(entries=entries)
+
+
 def list_dir(
     boundary: FsBoundary,
     path: str | Path = ".",
@@ -68,19 +82,6 @@ def list_dir(
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    class ListDirTool(Tool[ListDirInput, ListDirOutput]):
-        name = "list_dir"
-        description = "List directory entries up to depth"
-        InputModel = ListDirInput
-        OutputModel = ListDirOutput
-
-        def __init__(self, boundary: FsBoundary) -> None:
-            self.boundary = boundary
-
-        def execute(self, request: ListDirInput) -> ListDirOutput:
-            entries = list_dir(self.boundary, **request.model_dump())
-            return ListDirOutput(entries=entries)
-
     tool = ListDirTool(boundary)
 
     return [

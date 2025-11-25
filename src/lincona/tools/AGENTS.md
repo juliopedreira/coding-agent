@@ -7,21 +7,32 @@ schemas automatically.
 
 ## Required pattern
 
-1) Define models and a handler in the tool module:
+1) Define models **and a Tool subclass** in the tool module:
 ```python
 from pydantic import BaseModel, Field
 from lincona.tools.registry import ToolRegistration
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 
-class MyToolInput(BaseModel):
+class MyToolInput(ToolRequest):
     query: str = Field(description="What to search for")
 
-class MyToolOutput(BaseModel):
+class MyToolOutput(ToolResponse):
     results: list[str]
 
+class MyTool(Tool[MyToolInput, MyToolOutput]):
+    name = "my_tool"
+    description = "Describe what it does"
+    InputModel = MyToolInput
+    OutputModel = MyToolOutput
+
+    def __init__(self, boundary):
+        self.boundary = boundary
+
+    def execute(self, request: MyToolInput) -> MyToolOutput:
+        return MyToolOutput(results=[request.query.upper()])
+
 def tool_registrations(boundary, pty_manager=None):
-    def handler(data: BaseModel) -> BaseModel:
-        typed = MyToolInput.model_validate(data)
-        return MyToolOutput(results=[typed.query.upper()])
+    tool = MyTool(boundary)
 
     return [
         ToolRegistration(
@@ -29,7 +40,7 @@ def tool_registrations(boundary, pty_manager=None):
             description="Describe what it does",
             input_model=MyToolInput,
             output_model=MyToolOutput,
-            handler=handler,
+            handler=tool.execute,
             requires_approval=False,
             result_adapter=lambda out: out.model_dump(),  # optional legacy shape
         )

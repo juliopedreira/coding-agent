@@ -78,21 +78,22 @@ class ShellOutput(ToolResponse):
     message: str | None = None
 
 
+class ShellTool(Tool[ShellInput, ShellOutput]):
+    name = "shell"
+    description = "Run a shell command"
+    InputModel = ShellInput
+    OutputModel = ShellOutput
+    requires_approval = True
+
+    def __init__(self, boundary: FsBoundary) -> None:
+        self.boundary = boundary
+
+    def execute(self, request: ShellInput) -> ShellOutput:
+        result = run_shell(self.boundary, **request.model_dump())
+        return ShellOutput.model_validate(result)
+
+
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    class ShellTool(Tool[ShellInput, ShellOutput]):
-        name = "shell"
-        description = "Run a shell command"
-        InputModel = ShellInput
-        OutputModel = ShellOutput
-        requires_approval = True
-
-        def __init__(self, boundary: FsBoundary) -> None:
-            self.boundary = boundary
-
-        def execute(self, request: ShellInput) -> ShellOutput:
-            result = run_shell(self.boundary, **request.model_dump())
-            return ShellOutput.model_validate(result)
-
     tool = ShellTool(boundary)
 
     def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:

@@ -121,6 +121,34 @@ class WriteStdinOutput(ToolResponse):
     truncated: bool
 
 
+class ExecTool(Tool[ExecCommandInput, ExecCommandOutput]):
+    name = "exec_command"
+    description = "Run a PTY-backed long command"
+    InputModel = ExecCommandInput
+    OutputModel = ExecCommandOutput
+    requires_approval = True
+
+    def __init__(self, mgr: PtyManager) -> None:
+        self.mgr = mgr
+
+    def execute(self, request: ExecCommandInput) -> ExecCommandOutput:
+        return ExecCommandOutput.model_validate(self.mgr.exec_command(**request.model_dump()))
+
+
+class WriteStdinTool(Tool[WriteStdinInput, WriteStdinOutput]):
+    name = "write_stdin"
+    description = "Send input to existing PTY session"
+    InputModel = WriteStdinInput
+    OutputModel = WriteStdinOutput
+    requires_approval = True
+
+    def __init__(self, mgr: PtyManager) -> None:
+        self.mgr = mgr
+
+    def execute(self, request: WriteStdinInput) -> WriteStdinOutput:
+        return WriteStdinOutput.model_validate(self.mgr.write_stdin(**request.model_dump()))
+
+
 def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = None) -> list[ToolRegistration]:
     manager = pty_manager or PtyManager(boundary)
 
@@ -129,32 +157,6 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
             "session_id": getattr(validated, "session_id", None),
             "truncated": getattr(output, "truncated", None),
         }
-
-    class ExecTool(Tool[ExecCommandInput, ExecCommandOutput]):
-        name = "exec_command"
-        description = "Run a PTY-backed long command"
-        InputModel = ExecCommandInput
-        OutputModel = ExecCommandOutput
-        requires_approval = True
-
-        def __init__(self, mgr: PtyManager) -> None:
-            self.mgr = mgr
-
-        def execute(self, request: ExecCommandInput) -> ExecCommandOutput:
-            return ExecCommandOutput.model_validate(self.mgr.exec_command(**request.model_dump()))
-
-    class WriteStdinTool(Tool[WriteStdinInput, WriteStdinOutput]):
-        name = "write_stdin"
-        description = "Send input to existing PTY session"
-        InputModel = WriteStdinInput
-        OutputModel = WriteStdinOutput
-        requires_approval = True
-
-        def __init__(self, mgr: PtyManager) -> None:
-            self.mgr = mgr
-
-        def execute(self, request: WriteStdinInput) -> WriteStdinOutput:
-            return WriteStdinOutput.model_validate(self.mgr.write_stdin(**request.model_dump()))
 
     exec_tool = ExecTool(manager)
     write_tool = WriteStdinTool(manager)

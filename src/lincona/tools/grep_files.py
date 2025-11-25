@@ -25,6 +25,20 @@ class GrepFilesOutput(ToolResponse):
     results: list[str] = Field(description="Matches formatted as path:line:content.")
 
 
+class GrepFilesTool(Tool[GrepFilesInput, GrepFilesOutput]):
+    name = "grep_files"
+    description = "Recursive regex search with include globs"
+    InputModel = GrepFilesInput
+    OutputModel = GrepFilesOutput
+
+    def __init__(self, boundary: FsBoundary) -> None:
+        self.boundary = boundary
+
+    def execute(self, request: GrepFilesInput) -> GrepFilesOutput:
+        results = grep_files(self.boundary, **request.model_dump())
+        return GrepFilesOutput(results=results)
+
+
 def _iter_files(root: Path, include: list[str] | None = None) -> list[Path]:
     files: list[Path] = []
     if not root.is_dir():
@@ -71,19 +85,6 @@ def grep_files(
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    class GrepFilesTool(Tool[GrepFilesInput, GrepFilesOutput]):
-        name = "grep_files"
-        description = "Recursive regex search with include globs"
-        InputModel = GrepFilesInput
-        OutputModel = GrepFilesOutput
-
-        def __init__(self, boundary: FsBoundary) -> None:
-            self.boundary = boundary
-
-        def execute(self, request: GrepFilesInput) -> GrepFilesOutput:
-            results = grep_files(self.boundary, **request.model_dump())
-            return GrepFilesOutput(results=results)
-
     tool = GrepFilesTool(boundary)
 
     return [

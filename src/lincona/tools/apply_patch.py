@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
@@ -40,6 +40,26 @@ class PatchResultModel(ToolResponse):
 
 class ApplyPatchOutput(ToolResponse):
     results: list[PatchResultModel] = Field(description="Per-file patch results.")
+
+
+class ApplyPatchTool(Tool[ApplyPatchInput, ApplyPatchOutput]):
+    name = "apply_patch_json"
+    description = "Apply unified diff"
+    InputModel = ApplyPatchInput
+    OutputModel = ApplyPatchOutput
+    requires_approval = True
+
+    def __init__(self, boundary: FsBoundary, *, freeform: bool = False) -> None:
+        self.boundary = boundary
+        self.freeform = freeform
+
+    def execute(self, request: ApplyPatchInput) -> ApplyPatchOutput:
+        results = apply_patch(self.boundary, request.patch, freeform=self.freeform)
+        converted = [
+            PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
+            for res in results
+        ]
+        return ApplyPatchOutput(results=converted)
 
 
 def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False) -> list[PatchResult]:
@@ -96,38 +116,8 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    def _convert(results: list[PatchResult]) -> ApplyPatchOutput:
-        converted = [
-            PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
-            for res in results
-        ]
-        return ApplyPatchOutput(results=converted)
-
-    def _make_handler(freeform: bool) -> Callable[[BaseModel], BaseModel]:
-        def handler(data: BaseModel) -> BaseModel:
-            typed = cast(ApplyPatchInput, data)
-            results = apply_patch(boundary, typed.patch, freeform=freeform)
-            return _convert(results)
-
-        return handler
-
     def _end_event(validated: ApplyPatchInput, output: ApplyPatchOutput) -> dict[str, object]:
         return {"files": len(output.results)}
-
-    class ApplyPatchTool(Tool[ApplyPatchInput, ApplyPatchOutput]):
-        name = "apply_patch_json"
-        description = "Apply unified diff"
-        InputModel = ApplyPatchInput
-        OutputModel = ApplyPatchOutput
-        requires_approval = True
-
-        def __init__(self, boundary: FsBoundary, *, freeform: bool = False) -> None:
-            self.boundary = boundary
-            self.freeform = freeform
-
-        def execute(self, request: ApplyPatchInput) -> ApplyPatchOutput:
-            results = apply_patch(self.boundary, request.patch, freeform=self.freeform)
-            return _convert(results)
 
     return [
         ToolRegistration(
