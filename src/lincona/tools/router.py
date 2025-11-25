@@ -1,158 +1,59 @@
-"""Tool router exposing specs and dispatch for OpenAI tooling."""
+"""Tool router exposing specs and dispatch for OpenAI tooling.
+
+All tool parameters and outputs are defined via Pydantic models in
+per-tool modules. Tool specs advertised to the model are generated directly
+from each tool's Pydantic input schema to keep definitions DRY and typed.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
-from lincona.config import ApprovalPolicy
-from lincona.tools.apply_patch import apply_patch
+from pydantic import BaseModel
+
+from lincona.config import ApprovalPolicy, FsMode
+from lincona.tools import get_tool_registrations
 from lincona.tools.approval import ApprovalRequiredError, approval_guard
 from lincona.tools.exec_pty import PtyManager
 from lincona.tools.fs import FsBoundary
-from lincona.tools.grep_files import grep_files
-from lincona.tools.list_dir import list_dir
-from lincona.tools.read_file import read_file
-from lincona.tools.shell import run_shell
+from lincona.tools.registry import ToolRegistration
+
+_REGISTRATIONS_CACHE: list[ToolRegistration] | None = None
+
+
+def _ensure_registrations_cache() -> list[ToolRegistration]:
+    global _REGISTRATIONS_CACHE
+    if _REGISTRATIONS_CACHE is not None:
+        return _REGISTRATIONS_CACHE
+    boundary = FsBoundary(FsMode.RESTRICTED)
+    pty_manager = PtyManager(boundary)
+    _REGISTRATIONS_CACHE = get_tool_registrations(boundary, pty_manager)
+    return _REGISTRATIONS_CACHE
 
 
 def tool_specs() -> list[dict[str, Any]]:
-    """Return JSON tool specs matching MVP_00 parameters."""
+    """Return OpenAI tool specs derived from Pydantic schemas."""
 
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "list_dir",
-                "description": "List directory entries up to depth",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "default": "."},
-                        "depth": {"type": "integer", "default": 2, "minimum": 0},
-                        "offset": {"type": "integer", "default": 0, "minimum": 0},
-                        "limit": {"type": "integer", "default": 200, "minimum": 1},
-                    },
-                    "required": ["path", "depth", "offset", "limit"],
-                    "additionalProperties": False,
+    regs = _ensure_registrations_cache()
+    specs: list[dict[str, Any]] = []
+    for reg in regs:
+        params = reg.input_model.model_json_schema()
+        if isinstance(params, dict):
+            params.setdefault("additionalProperties", False)
+        specs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": reg.name,
+                    "description": reg.description,
+                    "parameters": params,
                 },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read file slice with optional indentation mode",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"},
-                        "offset": {"type": "integer", "default": 0, "minimum": 0},
-                        "limit": {"type": "integer", "default": 400, "minimum": 1},
-                        "mode": {"type": "string", "enum": ["slice", "indentation"], "default": "slice"},
-                        "indent": {"type": "string", "default": "    "},
-                    },
-                    "required": ["path", "offset", "limit", "mode", "indent"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "grep_files",
-                "description": "Recursive regex search with include globs",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "pattern": {"type": "string"},
-                        "path": {"type": "string", "default": "."},
-                        "include": {"type": "array", "items": {"type": "string"}},
-                        "limit": {"type": "integer", "default": 200, "minimum": 1},
-                    },
-                    "required": ["pattern", "path", "include", "limit"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "apply_patch_json",
-                "description": "Apply unified diff",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"patch": {"type": "string"}},
-                    "required": ["patch"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "apply_patch_freeform",
-                "description": "Apply patch using freeform envelope",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"patch": {"type": "string"}},
-                    "required": ["patch"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "shell",
-                "description": "Run a shell command",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string"},
-                        "workdir": {"type": "string"},
-                        "timeout_ms": {"type": "integer", "default": 60000, "minimum": 1},
-                    },
-                    "required": ["command", "workdir", "timeout_ms"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "exec_command",
-                "description": "Run a PTY-backed long command",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "session_id": {"type": "string"},
-                        "cmd": {"type": "string"},
-                        "workdir": {"type": "string"},
-                    },
-                    "required": ["session_id", "cmd", "workdir"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "write_stdin",
-                "description": "Send input to existing PTY session",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "session_id": {"type": "string"},
-                        "chars": {"type": "string"},
-                    },
-                    "required": ["session_id", "chars"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-    ]
+            }
+        )
+    return specs
 
 
 class ToolRouter:
@@ -175,50 +76,34 @@ class ToolRouter:
             if callable(register):
                 register(self.pty_manager)
         self.events: list[dict[str, Any]] = []
+        self._registrations = get_tool_registrations(self.boundary, self.pty_manager)
+        global _REGISTRATIONS_CACHE
+        _REGISTRATIONS_CACHE = self._registrations
+        self._spec_index = {reg.name: reg for reg in self._registrations}
+        self._handlers: dict[str, Callable[[BaseModel], BaseModel]] = self._build_handlers()
 
     def dispatch(self, name: str, **kwargs: Any) -> Any:
+        spec = self._spec_index.get(name)
+        handler = self._handlers.get(name)
+        if spec is None or handler is None:
+            raise ValueError(f"unknown tool {name}")
+
         self._emit_event("start", name, kwargs)
         self._log_request(name, kwargs)
-        result: Any
+
         try:
-            if name == "list_dir":
-                result = list_dir(self.boundary, **kwargs)
-            elif name == "read_file":
-                result = read_file(self.boundary, **kwargs)
-            elif name == "grep_files":
-                result = grep_files(self.boundary, **kwargs)
-            elif name == "apply_patch_json":
+            validated = spec.input_model.model_validate(kwargs)
+            if spec.requires_approval:
                 self._check_approval(name)
-                result = apply_patch(self.boundary, kwargs["patch"])
-                self._emit_event("end", name, {"files": len(result)})
-            elif name == "apply_patch_freeform":
-                self._check_approval(name)
-                result = apply_patch(self.boundary, kwargs["patch"], freeform=True)
-                self._emit_event("end", name, {"files": len(result)})
-            elif name == "shell":
-                self._check_approval(name)
-                result = run_shell(self.boundary, **kwargs)
-                self._emit_event(
-                    "end", name, {"returncode": result.get("returncode"), "timeout": result.get("timeout")}
-                )
-            elif name == "exec_command":
-                self._check_approval(name)
-                result = self.pty_manager.exec_command(**kwargs)
-                self._emit_event(
-                    "end", name, {"session_id": kwargs.get("session_id"), "truncated": result.get("truncated")}
-                )
-            elif name == "write_stdin":
-                self._check_approval(name)
-                result = self.pty_manager.write_stdin(**kwargs)
-                self._emit_event(
-                    "end", name, {"session_id": kwargs.get("session_id"), "truncated": result.get("truncated")}
-                )
-            else:
-                raise ValueError(f"unknown tool {name}")
+            output_model = handler(validated)
+            result = spec.result_adapter(output_model) if spec.result_adapter else output_model.model_dump()
         except Exception as exc:
             self._log_response(name, {"error": str(exc)})
             raise
 
+        end_builder = spec.end_event_builder
+        end_data = end_builder(validated, output_model) if end_builder else {}
+        self._emit_event("end", name, end_data)
         self._log_response(name, result)
         return result
 
@@ -248,6 +133,12 @@ class ToolRouter:
         if len(text) > 2000:
             return f"{text[:2000]}... [truncated]"
         return text
+
+    def _build_handlers(self) -> dict[str, Callable[[BaseModel], BaseModel]]:
+        handlers: dict[str, Callable[[BaseModel], BaseModel]] = {}
+        for reg in self._registrations:
+            handlers[reg.name] = reg.handler
+        return handlers
 
 
 __all__ = ["tool_specs", "ToolRouter", "ApprovalRequiredError"]

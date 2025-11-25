@@ -3,9 +3,25 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
+
+from pydantic import BaseModel, Field
 
 from lincona.tools.fs import FsBoundary
+from lincona.tools.registry import ToolRegistration
+
+
+class ListDirInput(BaseModel):
+    path: str = Field(default=".", description="Root directory to list from.")
+    depth: int = Field(default=2, ge=0, description="Maximum depth to traverse (BFS).")
+    offset: int = Field(default=0, ge=0, description="Number of entries to skip from the start.")
+    limit: int = Field(default=200, ge=1, description="Maximum number of entries to return.")
+
+
+class ListDirOutput(BaseModel):
+    entries: list[str] = Field(description="Directory entries with markers (/ for dir, @ for symlink).")
 
 
 def list_dir(
@@ -48,3 +64,28 @@ def list_dir(
                 queue.append((child, level + 1))
 
     return entries[offset : offset + limit]
+
+
+def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
+    def handler(data: ListDirInput) -> ListDirOutput:
+        entries = list_dir(boundary, **data.model_dump())
+        return ListDirOutput(entries=entries)
+
+    return [
+        ToolRegistration(
+            name="list_dir",
+            description="List directory entries up to depth",
+            input_model=ListDirInput,
+            output_model=ListDirOutput,
+            handler=cast(Callable[[BaseModel], BaseModel], handler),
+            result_adapter=lambda out: cast(ListDirOutput, out).entries,
+        )
+    ]
+
+
+__all__ = [
+    "list_dir",
+    "tool_registrations",
+    "ListDirInput",
+    "ListDirOutput",
+]

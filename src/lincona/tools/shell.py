@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import cast
+
+from pydantic import BaseModel, Field
 
 from lincona.tools.fs import FsBoundary
 from lincona.tools.limits import truncate_output
+from lincona.tools.registry import ToolRegistration
 
 
 def run_shell(
@@ -54,6 +58,48 @@ def run_shell(
             "timeout": True,
             "message": str(exc),
         }
+
+
+class ShellInput(BaseModel):
+    command: str = Field(description="Shell command to run.")
+    workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
+    timeout_ms: int = Field(default=60000, ge=1, description="Timeout in milliseconds.")
+
+
+class ShellOutput(BaseModel):
+    stdout: str
+    stderr: str
+    returncode: int | None
+    stdout_truncated: bool
+    stderr_truncated: bool
+    timeout: bool
+    message: str | None = None
+
+
+def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
+    def handler(data: BaseModel) -> BaseModel:
+        typed = cast(ShellInput, data)
+        result = run_shell(boundary, **typed.model_dump())
+        return ShellOutput.model_validate(result)
+
+    def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
+        out = cast(ShellOutput, output)
+        return {"returncode": out.returncode, "timeout": out.timeout}
+
+    return [
+        ToolRegistration(
+            name="shell",
+            description="Run a shell command",
+            input_model=ShellInput,
+            output_model=ShellOutput,
+            handler=handler,
+            requires_approval=True,
+            end_event_builder=_end_event,
+        )
+    ]
+
+
+__all__ = ["run_shell", "tool_registrations", "ShellInput", "ShellOutput"]
 
 
 __all__ = ["run_shell"]

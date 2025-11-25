@@ -3,8 +3,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
+
+from pydantic import BaseModel, Field
 
 from lincona.tools.fs import FsBoundary
+from lincona.tools.registry import ToolRegistration
+
+
+class ReadFileInput(BaseModel):
+    path: str = Field(description="File path to read.")
+    offset: int = Field(default=0, ge=0, description="Starting line (0-indexed).")
+    limit: int = Field(default=400, ge=1, description="Maximum number of lines to return.")
+    mode: str = Field(default="slice", description="Either 'slice' or 'indentation'.")
+    indent: str = Field(default="    ", description="Indentation prefix when mode='indentation'.")
+
+
+class ReadFileOutput(BaseModel):
+    text: str = Field(description="File contents (possibly truncated).")
+    truncated: bool = Field(description="True when not all lines were returned.")
 
 
 def read_file(
@@ -44,3 +61,29 @@ def read_file(
 
     text = "\n".join(processed)
     return text, len(lines) > offset + limit
+
+
+def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
+    def handler(data: BaseModel) -> BaseModel:
+        typed = cast(ReadFileInput, data)
+        text, truncated = read_file(boundary, **typed.model_dump())
+        return ReadFileOutput(text=text, truncated=truncated)
+
+    return [
+        ToolRegistration(
+            name="read_file",
+            description="Read file slice with optional indentation mode",
+            input_model=ReadFileInput,
+            output_model=ReadFileOutput,
+            handler=handler,
+            result_adapter=lambda out: (cast(ReadFileOutput, out).text, cast(ReadFileOutput, out).truncated),
+        )
+    ]
+
+
+__all__ = [
+    "read_file",
+    "tool_registrations",
+    "ReadFileInput",
+    "ReadFileOutput",
+]

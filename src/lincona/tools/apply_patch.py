@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
+
+from pydantic import BaseModel, Field
 
 from lincona.tools.fs import FsBoundary
 from lincona.tools.patch_parser import Hunk, PatchParseError, extract_freeform, parse_unified_diff
+from lincona.tools.registry import ToolRegistration
 
 
 class PatchApplyError(Exception):
@@ -21,6 +25,20 @@ class PatchResult:
     path: Path
     bytes_written: int
     created: bool
+
+
+class ApplyPatchInput(BaseModel):
+    patch: str = Field(description="Unified diff text or freeform apply_patch envelope.")
+
+
+class PatchResultModel(BaseModel):
+    path: str = Field(description="Patched file path.")
+    bytes_written: int = Field(description="Bytes written to the file.")
+    created: bool = Field(description="True if the file was newly created.")
+
+
+class ApplyPatchOutput(BaseModel):
+    results: list[PatchResultModel] = Field(description="Per-file patch results.")
 
 
 def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False) -> list[PatchResult]:
@@ -74,6 +92,49 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
         results.append(PatchResult(path=target, bytes_written=len(content.encode("utf-8")), created=not exists))
 
     return results
+
+
+def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
+    def _convert(results: list[PatchResult]) -> ApplyPatchOutput:
+        converted = [
+            PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
+            for res in results
+        ]
+        return ApplyPatchOutput(results=converted)
+
+    def _make_handler(freeform: bool) -> Callable[[BaseModel], BaseModel]:
+        def handler(data: BaseModel) -> BaseModel:
+            typed = cast(ApplyPatchInput, data)
+            results = apply_patch(boundary, typed.patch, freeform=freeform)
+            return _convert(results)
+
+        return handler
+
+    def _end_event(validated: ApplyPatchInput, output: ApplyPatchOutput) -> dict[str, object]:
+        return {"files": len(output.results)}
+
+    return [
+        ToolRegistration(
+            name="apply_patch_json",
+            description="Apply unified diff",
+            input_model=ApplyPatchInput,
+            output_model=ApplyPatchOutput,
+            handler=_make_handler(False),
+            requires_approval=True,
+            result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
+            end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
+        ),
+        ToolRegistration(
+            name="apply_patch_freeform",
+            description="Apply patch using freeform envelope",
+            input_model=ApplyPatchInput,
+            output_model=ApplyPatchOutput,
+            handler=_make_handler(True),
+            requires_approval=True,
+            result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
+            end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
+        ),
+    ]
 
 
 def _apply_hunks(original: list[str], hunks: list[Hunk]) -> list[str]:

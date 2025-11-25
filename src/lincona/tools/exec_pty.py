@@ -9,8 +9,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from lincona.tools.fs import FsBoundary
 from lincona.tools.limits import truncate_output
+from lincona.tools.registry import ToolRegistration
 
 
 @dataclass
@@ -94,4 +97,64 @@ class PtyManager:
         return {"output": truncated_text, "truncated": truncated}
 
 
-__all__ = ["PtyManager", "PtySession"]
+class ExecCommandInput(BaseModel):
+    session_id: str = Field(description="Opaque PTY session identifier.")
+    cmd: str = Field(description="Command to execute in PTY.")
+    workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
+
+
+class ExecCommandOutput(BaseModel):
+    output: str
+    truncated: bool
+
+
+class WriteStdinInput(BaseModel):
+    session_id: str = Field(description="Existing PTY session id.")
+    chars: str = Field(description="Characters to write to stdin.")
+
+
+class WriteStdinOutput(BaseModel):
+    output: str
+    truncated: bool
+
+
+def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = None) -> list[ToolRegistration]:
+    manager = pty_manager or PtyManager(boundary)
+
+    def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
+        return {
+            "session_id": getattr(validated, "session_id", None),
+            "truncated": getattr(output, "truncated", None),
+        }
+
+    return [
+        ToolRegistration(
+            name="exec_command",
+            description="Run a PTY-backed long command",
+            input_model=ExecCommandInput,
+            output_model=ExecCommandOutput,
+            handler=lambda data: ExecCommandOutput.model_validate(manager.exec_command(**data.model_dump())),
+            requires_approval=True,
+            end_event_builder=_end_event,
+        ),
+        ToolRegistration(
+            name="write_stdin",
+            description="Send input to existing PTY session",
+            input_model=WriteStdinInput,
+            output_model=WriteStdinOutput,
+            handler=lambda data: WriteStdinOutput.model_validate(manager.write_stdin(**data.model_dump())),
+            requires_approval=True,
+            end_event_builder=_end_event,
+        ),
+    ]
+
+
+__all__ = [
+    "PtyManager",
+    "PtySession",
+    "tool_registrations",
+    "ExecCommandInput",
+    "ExecCommandOutput",
+    "WriteStdinInput",
+    "WriteStdinOutput",
+]
