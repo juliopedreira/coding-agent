@@ -1,4 +1,3 @@
-
 import pytest
 
 from lincona.config import FsMode
