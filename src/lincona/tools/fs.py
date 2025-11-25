@@ -16,9 +16,8 @@ class FsBoundary:
 
     def __init__(self, fs_mode: FsMode, root: Path | None = None) -> None:
         self.fs_mode = fs_mode
-        self.root: Path | None
         if fs_mode == FsMode.RESTRICTED:
-            self.root = (root or Path.cwd()).resolve()
+            self.root: Path | None = (root or Path.cwd()).resolve()
         else:
             self.root = None  # unrestricted
 
