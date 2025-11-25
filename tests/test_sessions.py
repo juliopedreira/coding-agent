@@ -115,6 +115,7 @@ def test_session_list_resume_delete(tmp_path: Path) -> None:
     # Touch second file with older mtime to verify sorting
     older_id = "202401010101-22222222-2222-4222-8222-222222222222"
     older_path = session_path(older_id, base_dir)
+    older_path.parent.mkdir(parents=True, exist_ok=True)
     older_path.write_text("", encoding="utf-8")
     past = datetime.now(UTC) - timedelta(days=1)
     mod_time = past.timestamp()
@@ -130,6 +131,7 @@ def test_session_list_resume_delete(tmp_path: Path) -> None:
 
     delete_session(session_id, base_dir)
     assert not path.exists()
+    assert not path.parent.exists()
 
     # Deleting again should be silent
     delete_session(session_id, base_dir)
@@ -150,6 +152,6 @@ def test_session_paths_respect_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
 
     session_id = "202501020304-abc"
-    expected = tmp_path / "sessions" / f"{session_id}.jsonl"
+    expected = tmp_path / "sessions" / session_id / "events.jsonl"
 
     assert session_path(session_id) == expected

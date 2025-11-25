@@ -1,4 +1,9 @@
+import argparse
+
+import pytest
+
 from lincona import __version__, cli
+from lincona.config import Settings
 
 
 def test_version_constant() -> None:
@@ -67,7 +72,9 @@ def test_sessions_list_show_rm(tmp_path, monkeypatch, capsys):
     sessions_dir = tmp_path / "home" / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     session_id = "202401010000-1234"
-    session_file = sessions_dir / f"{session_id}.jsonl"
+    session_folder = sessions_dir / session_id
+    session_folder.mkdir(parents=True, exist_ok=True)
+    session_file = session_folder / "events.jsonl"
     session_file.write_text('{"hello":true}\n', encoding="utf-8")
 
     assert cli.main(["sessions", "list"]) == 0
@@ -80,3 +87,40 @@ def test_sessions_list_show_rm(tmp_path, monkeypatch, capsys):
 
     assert cli.main(["sessions", "rm", session_id]) == 0
     assert not session_file.exists()
+
+
+def test_sessions_show_missing(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
+    rc = cli.main(["sessions", "show", "missing-session"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "not found" in err
+
+
+def test_tool_arg_requires_equals():
+    settings = Settings(api_key="test")
+    args = argparse.Namespace(name="list_dir", json_payload=None, arg=["bad"], command="tool")
+    with pytest.raises(SystemExit):
+        cli._run_tool(settings, args)
+
+
+def test_tool_json_payload(monkeypatch):
+    called = {}
+
+    def fake_dispatch(self, name, **kwargs):
+        called["payload"] = kwargs
+        return {"ok": True}
+
+    monkeypatch.setattr(cli.ToolRouter, "dispatch", fake_dispatch)
+
+    settings = Settings(api_key="test")
+    args = argparse.Namespace(name="list_dir", json_payload='{"path": "."}', arg=[], command="tool")
+    rc = cli._run_tool(settings, args)
+    assert rc == 0
+    assert called["payload"]["path"] == "."
+
+
+def test_run_config_unknown_command():
+    settings = Settings(api_key="test")
+    args = argparse.Namespace(config_cmd="unknown")
+    assert cli._run_config(settings, args) == 1

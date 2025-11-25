@@ -27,6 +27,9 @@ test: $(VENV)
 
 ci: format lint typecheck test
 
+clean:
+	rm -rf $(VENV) .mypy_cache .ruff_cache .pytest_cache .coverage coverage.xml htmlcov .work lincona-debug.log .coverage.*
+
 lock:
 	POETRY_VIRTUALENVS_IN_PROJECT=1 $(POETRY) lock
 

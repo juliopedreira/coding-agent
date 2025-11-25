@@ -5,22 +5,21 @@ from lincona.cli import main
 
 
 def test_debug_flag_writes_log(tmp_path: Path, capsys, monkeypatch) -> None:
-    log_file = tmp_path / "dbg.log"
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
 
     async def fake_repl(self):
         return None
 
-    def fake_init(self, settings):  # type: ignore[override]
-        return None
-
-    monkeypatch.setattr(cli.AgentRunner, "__init__", fake_init)
     monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
 
-    rc = main(["--debug", str(log_file), "chat"])
+    rc = main(["--debug", str(tmp_path / "ignored.log"), "chat"])
 
     assert rc == 0
+    sessions_root = tmp_path / "sessions"
+    session_dirs = [p for p in sessions_root.iterdir() if p.is_dir()]
+    assert len(session_dirs) == 1
+    log_file = session_dirs[0] / "log.txt"
     assert log_file.exists()
     content = log_file.read_text()
-    # should include filename and line marker
-    assert "cli.py" in content
-    assert ":" in content  # line number separator
+    assert "session started" in content

@@ -1,39 +1,34 @@
 """Logging setup for Lincona sessions.
 
-Provides a per-session file logger with size-based truncation to guard against
-unbounded growth. The logger is isolated (no propagation) and avoids duplicate
-handlers across repeated initializations.
+Each session writes to ``~/.lincona/sessions/<session>/log.txt``. The logger is
+isolated (no propagation) and avoids duplicate handlers across repeated
+initializations.
 """
 
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 
 from lincona.config import LogLevel
-from lincona.paths import get_lincona_home
-
-DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+from lincona.sessions import session_dir
 
 
 def session_log_path(session_id: str, base_dir: Path | None = None) -> Path:
-    directory = base_dir or (get_lincona_home() / "logs")
-    return directory / f"{session_id}.log"
+    directory = session_dir(session_id, base_dir)
+    return directory / "log.txt"
 
 
 def configure_session_logger(
     session_id: str,
     *,
-    log_level: LogLevel | str = LogLevel.WARNING,
+    log_level: LogLevel | str = LogLevel.INFO,
     base_dir: Path | None = None,
-    max_bytes: int | None = DEFAULT_MAX_BYTES,
 ) -> logging.Logger:
     """Configure and return a file logger scoped to a session.
 
     Subsequent calls with the same session_id return the same logger without
-    duplicating handlers. If the log file exceeds ``max_bytes``, it is
-    truncated before attaching the handler.
+    duplicating handlers.
     """
 
     logger_name = f"lincona.session.{session_id}"
@@ -46,7 +41,6 @@ def configure_session_logger(
     if not logger.handlers:
         path = session_log_path(session_id, base_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        _truncate_if_oversize(path, max_bytes)
 
         handler = logging.FileHandler(path, encoding="utf-8")
         handler.setLevel(level_value)
@@ -54,18 +48,6 @@ def configure_session_logger(
         logger.addHandler(handler)
 
     return logger
-
-
-def _truncate_if_oversize(path: Path, max_bytes: int | None) -> None:
-    if max_bytes is None or max_bytes <= 0:
-        return
-    if not path.exists():
-        return
-    size = path.stat().st_size
-    if size <= max_bytes:
-        return
-    data = path.read_bytes()
-    path.write_bytes(data[-max_bytes:])
 
 
 def _to_logging_level(value: LogLevel | str) -> int:
@@ -81,11 +63,6 @@ def _to_logging_level(value: LogLevel | str) -> int:
         try:
             return mapping[LogLevel(value)]
         except ValueError:
-            warnings.warn(
-                f"Unknown log level '{value}', defaulting to WARNING",
-                RuntimeWarning,
-                stacklevel=2,
-            )
             return logging.WARNING
     return logging.WARNING
 
@@ -93,5 +70,5 @@ def _to_logging_level(value: LogLevel | str) -> int:
 __all__ = [
     "configure_session_logger",
     "session_log_path",
-    "DEFAULT_MAX_BYTES",
+    "_to_logging_level",
 ]

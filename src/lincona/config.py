@@ -64,7 +64,7 @@ class Settings(BaseModel):
     reasoning_effort: ReasoningEffort = ReasoningEffort.MEDIUM
     fs_mode: FsMode = FsMode.RESTRICTED
     approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
-    log_level: LogLevel = LogLevel.WARNING
+    log_level: LogLevel = LogLevel.INFO
 
     @field_validator("api_key")
     @classmethod

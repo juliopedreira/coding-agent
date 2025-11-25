@@ -121,9 +121,15 @@ def iter_events(path: Path | str) -> Iterator[Event]:
         yield Event.model_validate_json(stripped)
 
 
+def session_dir(session_id: str, base_dir: Path | None = None) -> Path:
+    base = base_dir or (get_lincona_home() / "sessions")
+    return base / session_id
+
+
 def session_path(session_id: str, base_dir: Path | None = None) -> Path:
-    directory = base_dir or (get_lincona_home() / "sessions")
-    return directory / f"{session_id}.jsonl"
+    """Return the events JSONL path for a session inside its dedicated folder."""
+
+    return session_dir(session_id, base_dir) / "events.jsonl"
 
 
 class SessionInfo(BaseModel):
@@ -136,17 +142,21 @@ class SessionInfo(BaseModel):
 
 
 def list_sessions(base_dir: Path | None = None) -> list[SessionInfo]:
-    directory = base_dir or (get_lincona_home() / "sessions")
-    if not directory.exists():
+    root = base_dir or (get_lincona_home() / "sessions")
+    if not root.exists():
         return []
 
     entries: list[SessionInfo] = []
-    for path in directory.glob("*.jsonl"):
-        session_id = path.stem
+    for directory in root.iterdir():
+        if not directory.is_dir():
+            continue
+        path = directory / "events.jsonl"
+        if not path.exists():
+            continue
         stat_result = path.stat()
         entries.append(
             SessionInfo(
-                session_id=session_id,
+                session_id=directory.name,
                 path=path,
                 modified_at=datetime.fromtimestamp(stat_result.st_mtime, tz=UTC),
                 size_bytes=stat_result.st_size,
@@ -163,10 +173,17 @@ def resume_session(session_id: str, base_dir: Path | None = None) -> Iterator[Ev
 
 
 def delete_session(session_id: str, base_dir: Path | None = None) -> None:
-    path = session_path(session_id, base_dir)
+    directory = session_dir(session_id, base_dir)
+    if not directory.exists():
+        return
+    for item in directory.iterdir():
+        try:
+            item.unlink()
+        except IsADirectoryError:
+            continue
     try:
-        path.unlink()
-    except FileNotFoundError:
+        directory.rmdir()
+    except OSError:
         return
 
 
@@ -177,6 +194,7 @@ __all__ = [
     "iter_events",
     "generate_session_id",
     "session_path",
+    "session_dir",
     "SessionInfo",
     "list_sessions",
     "resume_session",

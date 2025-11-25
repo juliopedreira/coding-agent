@@ -10,13 +10,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import logging
 import sys
-from pathlib import Path
 from typing import Any
 
 from lincona import __version__
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, load_settings
+from lincona.logging import _to_logging_level
 from lincona.paths import get_lincona_home
 from lincona.repl import AgentRunner
 from lincona.sessions import delete_session, list_sessions
@@ -40,7 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="lincona-debug.log",
         metavar="LOGFILE",
-        help="Enable debug logging to LOGFILE (default: lincona-debug.log in current directory).",
+        help=(
+            "Enable debug mode (root=INFO, lincona=DEBUG). Path argument is ignored; logging always goes to the "
+            "session log."
+        ),
     )
     parser.add_argument("--model", help="Override default model id")
     parser.add_argument("--reasoning", choices=[e.value for e in ReasoningEffort], help="Reasoning effort override")
@@ -93,12 +95,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if getattr(args, "debug", None):
-        _configure_debug_logging(Path(args.debug))
-        logging.getLogger(__name__).debug("debug mode enabled")
+    debug_enabled = getattr(args, "debug", None) is not None
 
-    overrides = _collect_overrides(args)
+    overrides = _collect_overrides(args, debug_enabled)
     settings = load_settings(cli_overrides=overrides, config_path=args.config_path)
+
+    _configure_base_logging(debug_enabled=debug_enabled, lincona_level=settings.log_level)
 
     command = args.command or "chat"
     if command == "chat":
@@ -151,7 +153,7 @@ def _run_sessions(args: argparse.Namespace) -> int:
             print(f"{info.session_id} {info.modified_at.isoformat()} {info.size_bytes}B {info.path}")
         return 0
     if args.sessions_cmd == "show":
-        path = home / "sessions" / f"{args.session_id}.jsonl"
+        path = home / "sessions" / args.session_id / "events.jsonl"
         if not path.exists():
             print("not found", file=sys.stderr)
             return 1
@@ -173,25 +175,32 @@ def _run_config(settings: Settings, args: argparse.Namespace) -> int:
     return 1
 
 
-def _collect_overrides(args: argparse.Namespace) -> dict[str, Any]:
+def _collect_overrides(args: argparse.Namespace, debug_enabled: bool) -> dict[str, Any]:
+    default_log_level = LogLevel.DEBUG.value if debug_enabled else None
+    log_level_override = args.log_level or default_log_level
     return {
         "model": args.model,
         "reasoning_effort": args.reasoning,
         "fs_mode": args.fs_mode,
         "approval_policy": args.approval_policy,
-        "log_level": args.log_level,
+        "log_level": log_level_override,
     }
 
 
-def _configure_debug_logging(log_path: Path) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+def _configure_base_logging(*, debug_enabled: bool, lincona_level: LogLevel | str) -> None:
+    import logging
+
+    root_level = logging.INFO if debug_enabled else logging.WARNING
+    lincona_level_value = _to_logging_level(lincona_level)
+
     logging.basicConfig(
-        level=logging.DEBUG,
-        filename=str(log_path),
-        filemode="w",
-        format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s",
+        level=root_level,
+        stream=sys.__stderr__,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         force=True,
     )
+
+    logging.getLogger("lincona").setLevel(lincona_level_value)
 
 
 if __name__ == "__main__":

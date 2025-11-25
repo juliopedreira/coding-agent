@@ -1,5 +1,4 @@
 import logging
-import warnings
 from pathlib import Path
 
 from lincona.config import LogLevel
@@ -8,12 +7,12 @@ from lincona.logging import configure_session_logger, session_log_path
 
 def test_session_log_path_respects_base(tmp_path: Path) -> None:
     path = session_log_path("abc", tmp_path)
-    assert path == tmp_path / "abc.log"
+    assert path == tmp_path / "abc" / "log.txt"
 
 
 def test_configure_session_logger_creates_file_and_logs(tmp_path: Path) -> None:
     session_id = "sess-1"
-    logger = configure_session_logger(session_id, base_dir=tmp_path, log_level=LogLevel.INFO, max_bytes=1024)
+    logger = configure_session_logger(session_id, base_dir=tmp_path, log_level=LogLevel.INFO)
 
     logger.info("hello world")
 
@@ -32,17 +31,6 @@ def test_configure_session_logger_is_idempotent(tmp_path: Path) -> None:
     assert len(logger1.handlers) == 1
 
 
-def test_truncates_oversized_log(tmp_path: Path) -> None:
-    session_id = "sess-large"
-    log_file = session_log_path(session_id, tmp_path)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_file.write_text("x" * 200, encoding="utf-8")
-
-    configure_session_logger(session_id, base_dir=tmp_path, max_bytes=100)
-
-    assert log_file.stat().st_size == 100
-
-
 def test_log_level_mapping(tmp_path: Path) -> None:
     session_id = "sess-level"
     logger = configure_session_logger(session_id, base_dir=tmp_path, log_level=LogLevel.DEBUG)
@@ -50,24 +38,11 @@ def test_log_level_mapping(tmp_path: Path) -> None:
     assert logger.level == logging.DEBUG
 
 
-def test_does_not_truncate_when_below_limit(tmp_path: Path) -> None:
-    session_id = "sess-small"
-    log_file = session_log_path(session_id, tmp_path)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_file.write_text("abc", encoding="utf-8")
-
-    configure_session_logger(session_id, base_dir=tmp_path, max_bytes=1024)
-
-    assert log_file.read_text() == "abc"
-
-
 def test_unknown_log_level_string_defaults_to_warning(tmp_path: Path) -> None:
     session_id = "sess-unknown"
-    with warnings.catch_warnings(record=True) as caught:
-        logger = configure_session_logger(session_id, base_dir=tmp_path, log_level="verbose")
+    logger = configure_session_logger(session_id, base_dir=tmp_path, log_level="verbose")
 
     assert logger.level == logging.WARNING
-    assert any("Unknown log level" in str(w.message) for w in caught)
 
 
 def test_string_log_level_maps(tmp_path: Path) -> None:
@@ -75,14 +50,3 @@ def test_string_log_level_maps(tmp_path: Path) -> None:
     logger = configure_session_logger(session_id, base_dir=tmp_path, log_level="info")
 
     assert logger.level == logging.INFO
-
-
-def test_disable_truncation(tmp_path: Path) -> None:
-    session_id = "sess-notrunc"
-    log_file = session_log_path(session_id, tmp_path)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_file.write_text("x" * 200, encoding="utf-8")
-
-    configure_session_logger(session_id, base_dir=tmp_path, max_bytes=None)
-
-    assert log_file.stat().st_size == 200

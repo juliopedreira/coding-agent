@@ -16,7 +16,7 @@ def test_settings_defaults() -> None:
     assert settings.reasoning_effort is ReasoningEffort.MEDIUM
     assert settings.fs_mode is FsMode.RESTRICTED
     assert settings.approval_policy is ApprovalPolicy.ON_REQUEST
-    assert settings.log_level is LogLevel.WARNING
+    assert settings.log_level is LogLevel.INFO
 
 
 @pytest.mark.parametrize(

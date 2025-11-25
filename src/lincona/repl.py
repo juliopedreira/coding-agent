@@ -58,11 +58,14 @@ class AgentRunner:
         shutdown_manager.register_event_writer(self.writer)
 
         self.logger = configure_session_logger(
-            self.session_id, log_level=settings.log_level, base_dir=self._home / "logs"
+            self.session_id, log_level=settings.log_level, base_dir=self._home / "sessions"
         )
         shutdown_manager.register_logger(self.logger)
+        self.logger.info("session started: %s", self.session_id)
 
-        self.router = ToolRouter(self.boundary, self.approval_policy, shutdown_manager=shutdown_manager)
+        self.router = ToolRouter(
+            self.boundary, self.approval_policy, shutdown_manager=shutdown_manager, logger=self.logger
+        )
 
         transport_instance = cast(
             ResponsesTransport, transport or OpenAISDKResponsesTransport(api_key=self._require_api_key())
@@ -117,8 +120,10 @@ class AgentRunner:
             # Present tool outputs directly and feed them back to the model as user context.
             tool_text = self._format_tool_outputs([msg for msg, _ in tool_messages])
             if tool_text:
-                self._safe_write(tool_text + "\n")
                 assistant_text += tool_text
+                # Tool responses are logged instead of printed to the console.
+                if self.logger:
+                    self.logger.debug("tool output: %s", tool_text)
             for msg, call in tool_messages:
                 feedback = f"Tool {call.tool_call.name} output:\n{msg.content}"
                 feedback_msg = Message(role=MessageRole.USER, content=feedback)
@@ -270,9 +275,12 @@ class AgentRunner:
         self.writer = JsonlEventWriter(session_path(self.session_id, self._home / "sessions"))
         shutdown_manager.register_event_writer(self.writer)
         self.logger = configure_session_logger(
-            self.session_id, log_level=self.settings.log_level, base_dir=self._home / "logs"
+            self.session_id, log_level=self.settings.log_level, base_dir=self._home / "sessions"
         )
         shutdown_manager.register_logger(self.logger)
+        # Keep router logging in sync with the active session logger.
+        self.router.logger = self.logger
+        self.logger.info("session started: %s", self.session_id)
         self.history.clear()
 
     def _record_event(self, role: Role, content: Any, *, tool_name: str | None = None) -> None:
