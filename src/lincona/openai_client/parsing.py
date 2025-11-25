@@ -20,7 +20,11 @@ from lincona.openai_client.types import (
     ToolCallStart,
 )
 
-DEFAULT_MAX_TOOL_BUFFER_BYTES = 32 * 1024
+# Default maximum accumulated tool-call arguments buffer (in bytes). The
+# previous 32KB limit was too small for larger tool calls (e.g., wide
+# directory listings). Bump to 512KB to reduce spurious StreamingParseError
+# while still bounding memory use.
+DEFAULT_MAX_TOOL_BUFFER_BYTES = 512 * 1024
 
 
 def _iter_lines(chunk: str) -> Iterable[str]:
