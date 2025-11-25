@@ -114,6 +114,3 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
 
 
 __all__ = ["run_shell", "tool_registrations", "ShellInput", "ShellOutput"]
-
-
-__all__ = ["run_shell"]
