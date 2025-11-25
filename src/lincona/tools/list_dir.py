@@ -52,6 +52,7 @@ def list_dir(
     root = boundary.sanitize_path(path)
     boundary.assert_within_root(root)
 
+    base_root = boundary.root_path()
     entries: list[str] = []
     queue: deque[tuple[Path, int]] = deque([(root, 0)])
 
@@ -71,7 +72,11 @@ def list_dir(
             elif child.is_symlink():
                 marker = "@"
 
-            relative = child.relative_to(root)
+            if base_root is not None:
+                relative = child.relative_to(base_root)
+            else:  # unrestricted: use resolved absolute path
+                relative = child.resolve()
+
             entry = f"{relative}{marker}"
             entries.append(entry)
 
