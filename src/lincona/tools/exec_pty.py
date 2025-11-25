@@ -21,7 +21,7 @@ from lincona.tools.registry import ToolRegistration
 
 @dataclass
 class PtySession:
-    pid: int
+    proc: subprocess.Popen[bytes]
     fd: int
     cwd: Path
 
@@ -47,7 +47,7 @@ class PtyManager:
             close_fds=True,
         )
         os.close(slave_fd)
-        self.sessions[session_id] = PtySession(pid=proc.pid, fd=master_fd, cwd=cwd)
+        self.sessions[session_id] = PtySession(proc=proc, fd=master_fd, cwd=cwd)
         self._cumulative[session_id] = 0
         return self._read(session_id)
 
@@ -58,16 +58,38 @@ class PtyManager:
         return self._read(session_id)
 
     def close(self, session_id: str) -> None:
-        session = self.sessions.pop(session_id, None)
-        if session:
+        session = self.sessions.get(session_id)
+        if session is None:
+            return
+
+        try:
+            session.proc.terminate()
+        except Exception:
+            try:
+                session.proc.kill()
+            except Exception:
+                pass
+        try:
+            session.proc.wait(timeout=2)
+        except Exception:
+            pass
+
+        try:
             os.close(session.fd)
-            self._cumulative.pop(session_id, None)
+        except OSError:
+            pass
+
+        self.sessions.pop(session_id, None)
+        self._cumulative.pop(session_id, None)
 
     def close_all(self) -> None:
         """Close all tracked PTY sessions."""
 
         for sid in list(self.sessions.keys()):
-            self.close(sid)
+            try:
+                self.close(sid)
+            except Exception:
+                continue
 
     def _read(self, session_id: str) -> dict[str, object]:
         session = self.sessions[session_id]

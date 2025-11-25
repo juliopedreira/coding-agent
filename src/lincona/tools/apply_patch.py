@@ -13,7 +13,7 @@ from pydantic import Field
 
 from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
-from lincona.tools.patch_parser import Hunk, PatchParseError, extract_freeform, parse_unified_diff
+from lincona.tools.patch_parser import Hunk, extract_freeform, parse_unified_diff
 from lincona.tools.registry import ToolRegistration
 
 
@@ -66,10 +66,7 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
     """Apply a unified diff (or freeform envelope) atomically within the boundary."""
 
     diff_text = extract_freeform(patch_text) if freeform else patch_text
-    try:
-        file_patches = parse_unified_diff(diff_text)
-    except PatchParseError:
-        raise
+    file_patches = parse_unified_diff(diff_text)
     results: list[PatchResult] = []
 
     for file_patch in file_patches:
@@ -103,13 +100,23 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
         new_lines = _apply_hunks(original_lines, file_patch.hunks)
         content = _join_preserve_trailing(new_lines, had_trailing)
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as tmp:
-            tmp.write(content)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-            tmp_path = Path(tmp.name)
-        tmp_path.replace(target)
+        tmp_path: Path | None = None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as tmp:
+                tmp.write(content)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                tmp_path = Path(tmp.name)
+            tmp_path.replace(target)
+        except Exception:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            raise
+
         results.append(PatchResult(path=target, bytes_written=len(content.encode("utf-8")), created=not exists))
 
     return results
