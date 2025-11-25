@@ -91,7 +91,9 @@ def grep_files(
         for lineno, line in enumerate(text.splitlines(), start=1):
             match = regex.search(line)
             if match:
-                results.append(f"{file_path.relative_to(root)}:{lineno}:{line}")
+                root_path = boundary.root_path()
+                rel_path = file_path.relative_to(root_path) if root_path is not None else file_path.resolve()
+                results.append(f"{rel_path}:{lineno}:{line}")
                 if len(results) >= limit:
                     return results
 

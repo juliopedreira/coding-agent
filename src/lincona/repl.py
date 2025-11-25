@@ -76,7 +76,17 @@ class AgentRunner:
             default_reasoning_effort=None,
         )
 
-        self.history: list[Message] = []
+        self.history: list[Message] = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "You are Lincona, a coding agent. Always use the provided tools to inspect the repository "
+                    "before answering questions about files, documentation, or code structure. The project source "
+                    "lives under the current working directory (not empty). Prefer list_dir/read_file/grep_files "
+                    "to gather evidence; do not guess."
+                ),
+            )
+        ]
 
     async def repl(self) -> None:
         """Run a synchronous-feeling REPL over asyncio."""
