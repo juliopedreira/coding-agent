@@ -128,11 +128,29 @@ class ToolRouter:
 
 @lru_cache(maxsize=128)
 def _schema_for_model(model: type[Any]) -> dict[str, Any]:
-    schema = model.model_json_schema()
-    if isinstance(schema, dict):
-        props = schema.get("properties", {}) or {}
-        schema["required"] = list(props.keys())
-        schema.setdefault("additionalProperties", False)
+    raw = model.model_json_schema()
+    schema = _inline_schema(raw)
+    props = schema.get("properties", {}) or {}
+    schema["required"] = list(props.keys())
+    schema.setdefault("additionalProperties", False)
+    return schema
+
+
+def _inline_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Flatten pydantic allOf/$defs output to a single inline schema."""
+
+    if "properties" in schema:
+        return schema
+    defs = schema.get("$defs")
+    all_of = schema.get("allOf")
+    if isinstance(defs, dict) and isinstance(all_of, list):
+        for item in all_of:
+            ref = item.get("$ref") if isinstance(item, dict) else None
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                key = ref.split("/")[-1]
+                inner = defs.get(key)
+                if isinstance(inner, dict):
+                    return inner
     return schema
 
 
