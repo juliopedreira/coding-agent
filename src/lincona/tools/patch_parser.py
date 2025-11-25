@@ -65,11 +65,15 @@ def parse_unified_diff(diff_text: str) -> list[FilePatch]:
             idx += 2
             delete = new_path == "/dev/null"
             hunks, idx = _parse_hunks(lines, idx)
+            if not hunks and not delete:
+                raise PatchParseError("no hunks found for patch")
             patches.append(FilePatch(path=file_path, hunks=hunks, delete=delete))
         elif line.startswith("*** Update File:"):
             file_path = Path(_normalize_path(line.split(":", 1)[1].strip()))
             idx += 1
             hunks, idx = _parse_hunks(lines, idx)
+            if not hunks:
+                raise PatchParseError("no hunks found for patch")
             patches.append(FilePatch(path=file_path, hunks=hunks))
         elif line.startswith("*** Delete File:"):
             file_path = Path(_normalize_path(line.split(":", 1)[1].strip()))
