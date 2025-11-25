@@ -18,25 +18,14 @@ from lincona.tools.approval import ApprovalRequiredError, approval_guard
 from lincona.tools.base import ToolRequest, ToolResponse
 from lincona.tools.exec_pty import PtyManager
 from lincona.tools.fs import FsBoundary
-from lincona.tools.registry import ToolRegistration
-
-_REGISTRATIONS_CACHE: list[ToolRegistration] | None = None
 
 
-def _ensure_registrations_cache() -> list[ToolRegistration]:
-    global _REGISTRATIONS_CACHE
-    if _REGISTRATIONS_CACHE is not None:
-        return _REGISTRATIONS_CACHE
-    boundary = FsBoundary(FsMode.RESTRICTED)
-    pty_manager = PtyManager(boundary)
-    _REGISTRATIONS_CACHE = get_tool_registrations(boundary, pty_manager)
-    return _REGISTRATIONS_CACHE
-
-
-def tool_specs() -> list[dict[str, Any]]:
+def tool_specs(boundary: FsBoundary | None = None, pty_manager: PtyManager | None = None) -> list[dict[str, Any]]:
     """Return OpenAI tool specs derived from Pydantic schemas."""
 
-    regs = _ensure_registrations_cache()
+    effective_boundary = boundary or FsBoundary(FsMode.RESTRICTED)
+    effective_pty = pty_manager or PtyManager(effective_boundary)
+    regs = get_tool_registrations(effective_boundary, effective_pty)
     specs: list[dict[str, Any]] = []
     for reg in regs:
         params = reg.input_model.model_json_schema()
@@ -76,8 +65,6 @@ class ToolRouter:
                 register(self.pty_manager)
         self.events: list[dict[str, Any]] = []
         self._registrations = get_tool_registrations(self.boundary, self.pty_manager)
-        global _REGISTRATIONS_CACHE
-        _REGISTRATIONS_CACHE = self._registrations
         self._spec_index = {reg.name: reg for reg in self._registrations}
         self._handlers: dict[str, Callable[[ToolRequest], ToolResponse]] = self._build_handlers()
 
