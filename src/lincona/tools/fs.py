@@ -45,7 +45,11 @@ class FsBoundary:
         return self.sanitize_path(workdir)
 
     def assert_within_root(self, path: Path) -> None:
-        """Raise if the resolved path escapes the boundary."""
+        """Raise if the resolved path escapes the boundary.
+
+        Note: callers are expected to pass already-resolved paths; this method
+        only checks membership relative to the boundary root.
+        """
 
         if self.root is None:
             return

@@ -55,11 +55,12 @@ class ApplyPatchTool(Tool[ApplyPatchInput, ApplyPatchOutput]):
 
     def execute(self, request: ApplyPatchInput) -> ApplyPatchOutput:
         results = apply_patch(self.boundary, request.patch, freeform=self.freeform)
-        converted = [
-            PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
-            for res in results
-        ]
-        return ApplyPatchOutput(results=converted)
+        return ApplyPatchOutput(
+            results=[
+                PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
+                for res in results
+            ]
+        )
 
 
 def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False) -> list[PatchResult]:
@@ -123,6 +124,14 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
+    def _convert_results(results: list[PatchResult]) -> ApplyPatchOutput:
+        return ApplyPatchOutput(
+            results=[
+                PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
+                for res in results
+            ]
+        )
+
     def _end_event(validated: ApplyPatchInput, output: ApplyPatchOutput) -> dict[str, object]:
         return {"files": len(output.results)}
 

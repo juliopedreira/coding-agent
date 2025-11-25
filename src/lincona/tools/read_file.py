@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
@@ -82,6 +82,10 @@ def read_file(
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
     tool = ReadFileTool(boundary)
 
+    def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
+        out = cast(ReadFileOutput, output)
+        return {"truncated": out.truncated}
+
     return [
         ToolRegistration(
             name="read_file",
@@ -90,6 +94,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=ReadFileOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             result_adapter=lambda out: (cast(ReadFileOutput, out).text, cast(ReadFileOutput, out).truncated),
+            end_event_builder=_end_event,
         )
     ]
 

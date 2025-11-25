@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
@@ -87,6 +87,10 @@ def grep_files(
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
     tool = GrepFilesTool(boundary)
 
+    def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
+        out = cast(GrepFilesOutput, output)
+        return {"matches": len(out.results)}
+
     return [
         ToolRegistration(
             name="grep_files",
@@ -95,6 +99,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=GrepFilesOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             result_adapter=lambda out: cast(GrepFilesOutput, out).results,
+            end_event_builder=_end_event,
         )
     ]
 
