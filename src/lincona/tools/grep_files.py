@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +20,19 @@ class GrepFilesInput(ToolRequest):
     path: str = Field(default=".", description="Root directory to search under.")
     include: list[str] | None = Field(default=None, description="Optional glob filters to include.")
     limit: int = Field(default=200, ge=1, description="Maximum matches to return.")
+
+    @classmethod
+    def model_validate(cls, value: object) -> GrepFilesInput:  # type: ignore[override]
+        if isinstance(value, dict) and isinstance(value.get("include"), str):
+            raw = value["include"].strip()
+            if raw in ("", "[]"):
+                value = {**value, "include": None}
+            else:
+                try:
+                    value = {**value, "include": json.loads(raw)}
+                except Exception:
+                    value = {**value, "include": [part.strip() for part in raw.split(",") if part.strip()]}
+        return super().model_validate(value)
 
 
 class GrepFilesOutput(ToolResponse):

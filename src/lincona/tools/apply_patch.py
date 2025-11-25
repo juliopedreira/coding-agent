@@ -143,7 +143,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=ApplyPatchOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=False).execute),
             requires_approval=True,
-            result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
+            result_adapter=lambda out: [r.model_dump() for r in cast(ApplyPatchOutput, out).results],
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
         ),
         ToolRegistration(
@@ -153,7 +153,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=ApplyPatchOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=True).execute),
             requires_approval=True,
-            result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
+            result_adapter=lambda out: [r.model_dump() for r in cast(ApplyPatchOutput, out).results],
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
         ),
     ]

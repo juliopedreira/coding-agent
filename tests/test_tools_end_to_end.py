@@ -40,7 +40,7 @@ def test_apply_patch_and_read_back(tmp_path: Path):
 """
     router = make_router(tmp_path)
     res = router.dispatch("apply_patch_json", patch=patch)
-    assert any(entry.created for entry in res)
+    assert any(entry.get("created") for entry in res)
     assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hi"
 
 
