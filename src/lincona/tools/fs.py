@@ -54,7 +54,12 @@ class FsBoundary:
             raise FsViolationError(f"path '{path}' escapes restricted root {self.root}")
 
     def _is_within(self, path: Path) -> bool:
-        """Return True if ``path`` is inside the boundary. Assumes ``path`` is already resolved."""
+        """Return True if ``path`` is inside the boundary.
+
+        Assumes ``path`` has already been resolved upstream. The check uses
+        ``Path.relative_to`` against the boundary root; if the path is outside
+        the root, ``relative_to`` raises ``ValueError`` and we return False.
+        """
 
         if self.root is None:
             return True
