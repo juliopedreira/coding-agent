@@ -16,7 +16,8 @@ def approval_guard(policy: ApprovalPolicy, tool_name: str) -> None:
         return
     if policy in (ApprovalPolicy.ALWAYS, ApprovalPolicy.ON_REQUEST):
         raise ApprovalRequiredError(f"approval required for tool {tool_name}")
-    # fallback: allow
+    else:  # defensive for future enum changes
+        raise ValueError(f"unknown approval policy: {policy}")
 
 
 __all__ = ["approval_guard", "ApprovalRequiredError"]
