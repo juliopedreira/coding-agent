@@ -6,11 +6,14 @@ import os
 import pty
 import select
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, Field
 
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
 from lincona.tools.limits import truncate_output
 from lincona.tools.registry import ToolRegistration
@@ -97,23 +100,23 @@ class PtyManager:
         return {"output": truncated_text, "truncated": truncated}
 
 
-class ExecCommandInput(BaseModel):
+class ExecCommandInput(ToolRequest):
     session_id: str = Field(description="Opaque PTY session identifier.")
     cmd: str = Field(description="Command to execute in PTY.")
     workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
 
 
-class ExecCommandOutput(BaseModel):
+class ExecCommandOutput(ToolResponse):
     output: str
     truncated: bool
 
 
-class WriteStdinInput(BaseModel):
+class WriteStdinInput(ToolRequest):
     session_id: str = Field(description="Existing PTY session id.")
     chars: str = Field(description="Characters to write to stdin.")
 
 
-class WriteStdinOutput(BaseModel):
+class WriteStdinOutput(ToolResponse):
     output: str
     truncated: bool
 
@@ -127,13 +130,42 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
             "truncated": getattr(output, "truncated", None),
         }
 
+    class ExecTool(Tool[ExecCommandInput, ExecCommandOutput]):
+        name = "exec_command"
+        description = "Run a PTY-backed long command"
+        InputModel = ExecCommandInput
+        OutputModel = ExecCommandOutput
+        requires_approval = True
+
+        def __init__(self, mgr: PtyManager) -> None:
+            self.mgr = mgr
+
+        def execute(self, request: ExecCommandInput) -> ExecCommandOutput:
+            return ExecCommandOutput.model_validate(self.mgr.exec_command(**request.model_dump()))
+
+    class WriteStdinTool(Tool[WriteStdinInput, WriteStdinOutput]):
+        name = "write_stdin"
+        description = "Send input to existing PTY session"
+        InputModel = WriteStdinInput
+        OutputModel = WriteStdinOutput
+        requires_approval = True
+
+        def __init__(self, mgr: PtyManager) -> None:
+            self.mgr = mgr
+
+        def execute(self, request: WriteStdinInput) -> WriteStdinOutput:
+            return WriteStdinOutput.model_validate(self.mgr.write_stdin(**request.model_dump()))
+
+    exec_tool = ExecTool(manager)
+    write_tool = WriteStdinTool(manager)
+
     return [
         ToolRegistration(
             name="exec_command",
             description="Run a PTY-backed long command",
             input_model=ExecCommandInput,
             output_model=ExecCommandOutput,
-            handler=lambda data: ExecCommandOutput.model_validate(manager.exec_command(**data.model_dump())),
+            handler=cast(Callable[[ToolRequest], ToolResponse], exec_tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
         ),
@@ -142,7 +174,7 @@ def tool_registrations(boundary: FsBoundary, pty_manager: PtyManager | None = No
             description="Send input to existing PTY session",
             input_model=WriteStdinInput,
             output_model=WriteStdinOutput,
-            handler=lambda data: WriteStdinOutput.model_validate(manager.write_stdin(**data.model_dump())),
+            handler=cast(Callable[[ToolRequest], ToolResponse], write_tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
         ),

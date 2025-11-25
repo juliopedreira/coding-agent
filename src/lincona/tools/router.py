@@ -12,11 +12,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import BaseModel
-
 from lincona.config import ApprovalPolicy, FsMode
 from lincona.tools import get_tool_registrations
 from lincona.tools.approval import ApprovalRequiredError, approval_guard
+from lincona.tools.base import ToolRequest, ToolResponse
 from lincona.tools.exec_pty import PtyManager
 from lincona.tools.fs import FsBoundary
 from lincona.tools.registry import ToolRegistration
@@ -80,7 +79,7 @@ class ToolRouter:
         global _REGISTRATIONS_CACHE
         _REGISTRATIONS_CACHE = self._registrations
         self._spec_index = {reg.name: reg for reg in self._registrations}
-        self._handlers: dict[str, Callable[[BaseModel], BaseModel]] = self._build_handlers()
+        self._handlers: dict[str, Callable[[ToolRequest], ToolResponse]] = self._build_handlers()
 
     def dispatch(self, name: str, **kwargs: Any) -> Any:
         spec = self._spec_index.get(name)
@@ -134,8 +133,8 @@ class ToolRouter:
             return f"{text[:2000]}... [truncated]"
         return text
 
-    def _build_handlers(self) -> dict[str, Callable[[BaseModel], BaseModel]]:
-        handlers: dict[str, Callable[[BaseModel], BaseModel]] = {}
+    def _build_handlers(self) -> dict[str, Callable[[ToolRequest], ToolResponse]]:
+        handlers: dict[str, Callable[[ToolRequest], ToolResponse]] = {}
         for reg in self._registrations:
             handlers[reg.name] = reg.handler
         return handlers

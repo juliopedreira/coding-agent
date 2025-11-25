@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 from pydantic import BaseModel, Field
 
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
 from lincona.tools.limits import truncate_output
 from lincona.tools.registry import ToolRegistration
@@ -60,13 +62,13 @@ def run_shell(
         }
 
 
-class ShellInput(BaseModel):
+class ShellInput(ToolRequest):
     command: str = Field(description="Shell command to run.")
     workdir: str | Path | None = Field(default=None, description="Working directory (optional).")
     timeout_ms: int = Field(default=60000, ge=1, description="Timeout in milliseconds.")
 
 
-class ShellOutput(BaseModel):
+class ShellOutput(ToolResponse):
     stdout: str
     stderr: str
     returncode: int | None
@@ -77,10 +79,21 @@ class ShellOutput(BaseModel):
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    def handler(data: BaseModel) -> BaseModel:
-        typed = cast(ShellInput, data)
-        result = run_shell(boundary, **typed.model_dump())
-        return ShellOutput.model_validate(result)
+    class ShellTool(Tool[ShellInput, ShellOutput]):
+        name = "shell"
+        description = "Run a shell command"
+        InputModel = ShellInput
+        OutputModel = ShellOutput
+        requires_approval = True
+
+        def __init__(self, boundary: FsBoundary) -> None:
+            self.boundary = boundary
+
+        def execute(self, request: ShellInput) -> ShellOutput:
+            result = run_shell(self.boundary, **request.model_dump())
+            return ShellOutput.model_validate(result)
+
+    tool = ShellTool(boundary)
 
     def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
         out = cast(ShellOutput, output)
@@ -92,7 +105,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             description="Run a shell command",
             input_model=ShellInput,
             output_model=ShellOutput,
-            handler=handler,
+            handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             requires_approval=True,
             end_event_builder=_end_event,
         )

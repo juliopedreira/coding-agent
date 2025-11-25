@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
 from lincona.tools.registry import ToolRegistration
 
 
-class GrepFilesInput(BaseModel):
+class GrepFilesInput(ToolRequest):
     pattern: str = Field(description="Regex pattern to search for.")
     path: str = Field(default=".", description="Root directory to search under.")
     include: list[str] | None = Field(default=None, description="Optional glob filters to include.")
     limit: int = Field(default=200, ge=1, description="Maximum matches to return.")
 
 
-class GrepFilesOutput(BaseModel):
+class GrepFilesOutput(ToolResponse):
     results: list[str] = Field(description="Matches formatted as path:line:content.")
 
 
@@ -69,10 +71,20 @@ def grep_files(
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    def handler(data: BaseModel) -> BaseModel:
-        typed = cast(GrepFilesInput, data)
-        results = grep_files(boundary, **typed.model_dump())
-        return GrepFilesOutput(results=results)
+    class GrepFilesTool(Tool[GrepFilesInput, GrepFilesOutput]):
+        name = "grep_files"
+        description = "Recursive regex search with include globs"
+        InputModel = GrepFilesInput
+        OutputModel = GrepFilesOutput
+
+        def __init__(self, boundary: FsBoundary) -> None:
+            self.boundary = boundary
+
+        def execute(self, request: GrepFilesInput) -> GrepFilesOutput:
+            results = grep_files(self.boundary, **request.model_dump())
+            return GrepFilesOutput(results=results)
+
+    tool = GrepFilesTool(boundary)
 
     return [
         ToolRegistration(
@@ -80,7 +92,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             description="Recursive regex search with include globs",
             input_model=GrepFilesInput,
             output_model=GrepFilesOutput,
-            handler=handler,
+            handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             result_adapter=lambda out: cast(GrepFilesOutput, out).results,
         )
     ]

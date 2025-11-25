@@ -7,20 +7,21 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
 from lincona.tools.registry import ToolRegistration
 
 
-class ListDirInput(BaseModel):
+class ListDirInput(ToolRequest):
     path: str = Field(default=".", description="Root directory to list from.")
     depth: int = Field(default=2, ge=0, description="Maximum depth to traverse (BFS).")
     offset: int = Field(default=0, ge=0, description="Number of entries to skip from the start.")
     limit: int = Field(default=200, ge=1, description="Maximum number of entries to return.")
 
 
-class ListDirOutput(BaseModel):
+class ListDirOutput(ToolResponse):
     entries: list[str] = Field(description="Directory entries with markers (/ for dir, @ for symlink).")
 
 
@@ -67,9 +68,20 @@ def list_dir(
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    def handler(data: ListDirInput) -> ListDirOutput:
-        entries = list_dir(boundary, **data.model_dump())
-        return ListDirOutput(entries=entries)
+    class ListDirTool(Tool[ListDirInput, ListDirOutput]):
+        name = "list_dir"
+        description = "List directory entries up to depth"
+        InputModel = ListDirInput
+        OutputModel = ListDirOutput
+
+        def __init__(self, boundary: FsBoundary) -> None:
+            self.boundary = boundary
+
+        def execute(self, request: ListDirInput) -> ListDirOutput:
+            entries = list_dir(self.boundary, **request.model_dump())
+            return ListDirOutput(entries=entries)
+
+    tool = ListDirTool(boundary)
 
     return [
         ToolRegistration(
@@ -77,7 +89,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             description="List directory entries up to depth",
             input_model=ListDirInput,
             output_model=ListDirOutput,
-            handler=cast(Callable[[BaseModel], BaseModel], handler),
+            handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
             result_adapter=lambda out: cast(ListDirOutput, out).entries,
         )
     ]

@@ -11,19 +11,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from lincona.tools.base import ToolRequest, ToolResponse
 
 
 @dataclass(frozen=True)
 class ToolRegistration:
     name: str
     description: str
-    input_model: type[BaseModel]
-    output_model: type[BaseModel]
-    handler: Callable[[BaseModel], BaseModel]
+    input_model: type[ToolRequest]
+    output_model: type[ToolResponse]
+    handler: Callable[[ToolRequest], ToolResponse]
     requires_approval: bool = False
-    result_adapter: Callable[[BaseModel], Any] | None = None
-    end_event_builder: Callable[[BaseModel, BaseModel], dict[str, Any]] | None = None
+    result_adapter: Callable[[ToolResponse], Any] | None = None
+    end_event_builder: Callable[[ToolRequest, ToolResponse], dict[str, Any]] | None = None
 
 
 __all__ = ["ToolRegistration"]

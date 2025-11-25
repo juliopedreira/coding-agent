@@ -11,6 +11,7 @@ from typing import cast
 
 from pydantic import BaseModel, Field
 
+from lincona.tools.base import Tool, ToolRequest, ToolResponse
 from lincona.tools.fs import FsBoundary
 from lincona.tools.patch_parser import Hunk, PatchParseError, extract_freeform, parse_unified_diff
 from lincona.tools.registry import ToolRegistration
@@ -27,17 +28,17 @@ class PatchResult:
     created: bool
 
 
-class ApplyPatchInput(BaseModel):
+class ApplyPatchInput(ToolRequest):
     patch: str = Field(description="Unified diff text or freeform apply_patch envelope.")
 
 
-class PatchResultModel(BaseModel):
+class PatchResultModel(ToolResponse):
     path: str = Field(description="Patched file path.")
     bytes_written: int = Field(description="Bytes written to the file.")
     created: bool = Field(description="True if the file was newly created.")
 
 
-class ApplyPatchOutput(BaseModel):
+class ApplyPatchOutput(ToolResponse):
     results: list[PatchResultModel] = Field(description="Per-file patch results.")
 
 
@@ -113,13 +114,28 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
     def _end_event(validated: ApplyPatchInput, output: ApplyPatchOutput) -> dict[str, object]:
         return {"files": len(output.results)}
 
+    class ApplyPatchTool(Tool[ApplyPatchInput, ApplyPatchOutput]):
+        name = "apply_patch_json"
+        description = "Apply unified diff"
+        InputModel = ApplyPatchInput
+        OutputModel = ApplyPatchOutput
+        requires_approval = True
+
+        def __init__(self, boundary: FsBoundary, *, freeform: bool = False) -> None:
+            self.boundary = boundary
+            self.freeform = freeform
+
+        def execute(self, request: ApplyPatchInput) -> ApplyPatchOutput:
+            results = apply_patch(self.boundary, request.patch, freeform=self.freeform)
+            return _convert(results)
+
     return [
         ToolRegistration(
             name="apply_patch_json",
             description="Apply unified diff",
             input_model=ApplyPatchInput,
             output_model=ApplyPatchOutput,
-            handler=_make_handler(False),
+            handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=False).execute),
             requires_approval=True,
             result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
@@ -129,7 +145,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             description="Apply patch using freeform envelope",
             input_model=ApplyPatchInput,
             output_model=ApplyPatchOutput,
-            handler=_make_handler(True),
+            handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=True).execute),
             requires_approval=True,
             result_adapter=lambda out: cast(ApplyPatchOutput, out).results,
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
