@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any
 
 from lincona.config import ApprovalPolicy, FsMode
@@ -28,9 +29,7 @@ def tool_specs(boundary: FsBoundary | None = None, pty_manager: PtyManager | Non
     regs = get_tool_registrations(effective_boundary, effective_pty)
     specs: list[dict[str, Any]] = []
     for reg in regs:
-        params = reg.input_model.model_json_schema()
-        if isinstance(params, dict):
-            params.setdefault("additionalProperties", False)
+        params = _schema_for_model(reg.input_model)
         specs.append(
             {
                 "type": "function",
@@ -125,6 +124,16 @@ class ToolRouter:
         for reg in self._registrations:
             handlers[reg.name] = reg.handler
         return handlers
+
+
+@lru_cache(maxsize=128)
+def _schema_for_model(model: type[Any]) -> dict[str, Any]:
+    schema = model.model_json_schema()
+    if isinstance(schema, dict):
+        props = schema.get("properties", {}) or {}
+        schema["required"] = list(props.keys())
+        schema.setdefault("additionalProperties", False)
+    return schema
 
 
 __all__ = ["tool_specs", "ToolRouter", "ApprovalRequiredError"]
