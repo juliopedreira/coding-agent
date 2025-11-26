@@ -202,6 +202,13 @@ def _configure_base_logging(*, debug_enabled: bool, lincona_level: LogLevel | st
 
     logging.getLogger("lincona").setLevel(lincona_level_value)
 
+    # Silence noisy client libraries on the console; their output is still
+    # available in the per-session file logger if enabled elsewhere.
+    for noisy in ("httpx", "httpcore"):
+        logger = logging.getLogger(noisy)
+        logger.setLevel(logging.WARNING)
+        logger.propagate = False
+
 
 if __name__ == "__main__":
     sys.exit(main())
