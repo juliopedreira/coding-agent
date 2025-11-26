@@ -29,7 +29,9 @@ def test_grep_files(tmp_path: Path):
     router = make_router(tmp_path)
 
     results = router.dispatch("grep_files", pattern="todo", path=".", include=["*.txt"], limit=10)
-    assert results and "todo" in results[0]
+    assert results
+    assert results[0]["file"] == "a.txt"
+    assert results[0]["matches"][0]["line_num"] == 1
 
 
 def test_apply_patch_and_read_back(tmp_path: Path):

@@ -15,7 +15,8 @@ def test_grep_matches_and_limit(tmp_path: Path) -> None:
     results = grep_files(boundary, r"hello", path=".", limit=1)
 
     assert len(results) == 1
-    assert results[0].startswith("a.txt:")
+    assert results[0].file == "a.txt"
+    assert results[0].matches[0].line_num == 1
 
 
 def test_grep_include_glob(tmp_path: Path) -> None:
@@ -27,7 +28,9 @@ def test_grep_include_glob(tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     results = grep_files(boundary, "match", include=["*.txt"])
 
-    assert results == ["a.txt:1:match"]
+    assert len(results) == 1
+    assert results[0].file == "a.txt"
+    assert results[0].matches[0].line == "match"
 
 
 def test_grep_skips_non_dir_path(tmp_path: Path) -> None:
@@ -66,3 +69,17 @@ def test_grep_handles_read_error(monkeypatch, tmp_path: Path) -> None:
 
     results = grep_files(boundary, "match")
     assert results == []
+
+
+def test_grep_truncates_long_lines(tmp_path: Path) -> None:
+    file1 = tmp_path / "a.txt"
+    long_line = "x" * 1500
+    file1.write_text(long_line + "\nshort\n", encoding="utf-8")
+
+    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+    results = grep_files(boundary, "x+", path=".")
+
+    assert len(results) == 1
+    match = results[0].matches[0]
+    assert match.line.startswith("x" * 1000)
+    assert match.truncated is True

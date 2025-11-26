@@ -89,7 +89,14 @@ their module; `ToolRouter` gathers them automatically.
 - **Output (GrepFilesOutput)**:
   ```json
   {
-    "results": ["utils/helpers.py:14:# TODO refine error handling"]
+    "results": [
+      {
+        "file": "utils/helpers.py",
+        "matches": [
+          {"line_num": 14, "line": "# TODO refine error handling"}
+        ]
+      }
+    ]
   }
   ```
 

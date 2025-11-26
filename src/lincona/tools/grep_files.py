@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import cast
 
@@ -16,7 +16,7 @@ from lincona.tools.registry import ToolRegistration
 
 
 class GrepFilesInput(ToolRequest):
-    pattern: str = Field(description="Regex pattern to search for.")
+    pattern: str = Field(description="Regex(Python re) pattern to search for in files' lines.")
     path: str = Field(default=".", description="Root directory to search under.")
     include: list[str] | None = Field(default=None, description="Optional glob filters to include.")
     limit: int = Field(default=200, ge=1, description="Maximum matches to return.")
@@ -36,12 +36,27 @@ class GrepFilesInput(ToolRequest):
 
 
 class GrepFilesOutput(ToolResponse):
-    results: list[str] = Field(description="Matches formatted as path:line:content.")
+    results: list[FileMatches] = Field(
+        description="Matches grouped per file. Each match includes line number, content, and optional truncation flag."
+    )
+
+
+class LineMatch(ToolResponse):
+    line_num: int = Field(description="Line number (1-indexed) where the pattern matched.")
+    line: str = Field(description="Line content (possibly truncated).")
+    truncated: bool | None = Field(
+        default=None, description="Present and true when the line was truncated to fit size limits."
+    )
+
+
+class FileMatches(ToolResponse):
+    file: str = Field(description="File path of the matches (relative to boundary root when restricted).")
+    matches: list[LineMatch] = Field(description="Matches found in this file.")
 
 
 class GrepFilesTool(Tool[GrepFilesInput, GrepFilesOutput]):
     name = "grep_files"
-    description = "Recursive regex search with include globs"
+    description = "Recursive regex search with include globs; returns path + line-number grouped results"
     InputModel = GrepFilesInput
     OutputModel = GrepFilesOutput
 
@@ -53,16 +68,16 @@ class GrepFilesTool(Tool[GrepFilesInput, GrepFilesOutput]):
         return GrepFilesOutput(results=results)
 
 
-def _iter_files(root: Path, include: list[str] | None = None) -> list[Path]:
-    files: list[Path] = []
+def _iter_files(root: Path, include: list[str] | None = None) -> Iterable[Path]:
+    """Yield files under root lazily, honoring optional include globs."""
+
     if not root.is_dir():
-        return files
+        return
     for path in root.rglob("*"):
         if path.is_file():
             if include and not any(path.match(glob) for glob in include):
                 continue
-            files.append(path)
-    return files
+            yield path
 
 
 def grep_files(
@@ -72,30 +87,43 @@ def grep_files(
     path: str | Path = ".",
     include: list[str] | None = None,
     limit: int = 200,
-) -> list[str]:
-    """Search files under path for regex pattern."""
+) -> list[FileMatches]:
+    """Search files under path for regex pattern, grouping matches per file."""
 
     root = boundary.sanitize_path(path)
     boundary.assert_within_root(root)
 
     regex = re.compile(pattern)
-    results: list[str] = []
+    results: list[FileMatches] = []
+    total_matches = 0
+    root_path = boundary.root_path()
 
-    files = _iter_files(root, include)
-    for file_path in files:
+    current_file: FileMatches | None = None
+
+    for file_path in _iter_files(root, include) or []:
         boundary.assert_within_root(file_path)
         try:
             text = file_path.read_text(encoding="utf-8", errors="ignore")
         except (OSError, UnicodeDecodeError):
             continue
+
+        file_matches: list[LineMatch] = []
         for lineno, line in enumerate(text.splitlines(), start=1):
-            match = regex.search(line)
-            if match:
-                root_path = boundary.root_path()
-                rel_path = file_path.relative_to(root_path) if root_path is not None else file_path.resolve()
-                results.append(f"{rel_path}:{lineno}:{line}")
-                if len(results) >= limit:
-                    return results
+            if regex.search(line):
+                truncated = None
+                if len(line) > 1000:
+                    line = line[:1000] + "… [truncated]"
+                    truncated = True
+                file_matches.append(LineMatch(line_num=lineno, line=line, truncated=truncated))
+                total_matches += 1
+                if total_matches >= limit:
+                    break
+        if file_matches:
+            rel_path = file_path.relative_to(root_path) if root_path is not None else file_path.resolve()
+            current_file = FileMatches(file=str(rel_path), matches=file_matches)
+            results.append(current_file)
+        if total_matches >= limit:
+            break
 
     return results
 
@@ -105,16 +133,17 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
 
     def _end_event(validated: BaseModel, output: BaseModel) -> dict[str, object]:
         out = cast(GrepFilesOutput, output)
-        return {"matches": len(out.results)}
+        match_count = sum(len(file.matches) for file in out.results)
+        return {"matches": match_count}
 
     return [
         ToolRegistration(
             name="grep_files",
-            description="Recursive regex search with include globs",
+            description="Recursive regex search with include globs; returns grouped path+line matches.",
             input_model=GrepFilesInput,
             output_model=GrepFilesOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], tool.execute),
-            result_adapter=lambda out: cast(GrepFilesOutput, out).results,
+            result_adapter=lambda out: [fm.model_dump(exclude_none=True) for fm in cast(GrepFilesOutput, out).results],
             end_event_builder=_end_event,
         )
     ]
