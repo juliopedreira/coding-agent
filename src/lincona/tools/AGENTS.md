@@ -1,7 +1,7 @@
 # Tools Authoring Guide
 
 All tools must follow the OpenAI Agents tooling spec and declare inputs/outputs
-with **Pydantic v2** models. Each tool module owns its models and registers
+with **[pydantic2](https://pypi.org/project/pydantic2/)** models. Each tool module owns its models and registers
 itself via `tool_registrations(...)`; `ToolRouter` aggregates these and builds
 schemas automatically.
 
@@ -66,5 +66,24 @@ whenever you add or modify a tool.
 - **Schema source of truth**: never hand-write JSON schemas; `tool_specs()` uses
   `model_json_schema()` from your input model.
 - **Examples**: keep `tools/README.md` examples in sync with reality.
+
+## Best practices for defining functions (tools)
+* **Write clear and detailed function names, parameter descriptions, and instructions.**
+    * **Explicitly describe the purpose of the function and each parameter** (and its format), and what the output represents.
+    * **Use the system prompt to describe when (and when not) to use each function**. Generally, tell the model exactly what to do.
+    * **Include examples and edge cases**, especially to rectify any recurring failures. (Note: Adding examples may hurt performance for reasoning models.)
+
+* **Apply software engineering best practices.**
+    * **Make the functions obvious and intuitive**. (principle of least surprise)
+    * **Use enums and object structure to make invalid states unrepresentable**. (e.g. toggle_light(on: bool, off: bool) allows for invalid calls)
+    * **Pass the intern test**. Can an intern/human correctly use the function given nothing but what you gave the model? (If not, what questions do they ask you? Add the answers to the prompt.)
+
+* **Offload the burden from the model and use code where possible**.
+    * **Don't make the model fill arguments you already know**. For example, if you already have an order_id based on a previous menu, don't have an order_id param – instead, have no params submit_refund() and pass the order_id with code.
+    * **Combine functions that are always called in sequence**. For example, if you always call mark_location() after query_location(), just move the marking logic into the query function call.
+
+* **Keep the number of functions small for higher accuracy**.
+    * **Evaluate your performance** with different numbers of functions.
+    * **Aim for fewer than 20 functions at any one time**, though this is just a soft suggestion.
 
 Reference: <https://openai.github.io/openai-agents-python/tools/>
