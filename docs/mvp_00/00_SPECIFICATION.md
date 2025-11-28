@@ -5,11 +5,11 @@ Goal: ship a Linux-only interactive coding agent CLI, inspired by Codex, using P
 ## In Scope
 - Interactive TUI chat experience (Textual/Rich) with multi-turn sessions, resumable from disk.
 - Tooling exposed to the model: `list_dir`, `read_file`, `grep_files`, `apply_patch` (JSON + freeform envelope), `shell` (string command), `exec/pty` (long-lived command session).
-- User slash-commands during a session: `/newsession`, `/model <id>`, `/reasoning <level>`, `/approvals <policy>`, `/fsmode <restricted|unrestricted>`, `/help`, `/quit`.
+- User slash-commands during a session: `/newsession`, `/model:list`, `/model:set <id>`, `/reasoning <level>`, `/approvals <policy>`, `/fsmode <restricted|unrestricted>`, `/help`, `/quit`.
 - FS boundary modes: `restricted` (only cwd subtree) and `unrestricted`; user can switch live.
 - Approval policy default: `never` (trusted user); user can switch via slash command.
 - Persistence: config + sessions.
-  - `~/.lincona/config.toml` for defaults (api_key, model, reasoning_effort, fs_mode, approval_policy, log_level).
+- `~/.lincona/config.toml` for defaults (api_key, model, allowed_models, reasoning_effort, fs_mode, approval_policy, log_level); created on first run if missing.
   - `~/.lincona/sessions/<id>.jsonl` for transcripts/events (JSONL).
   - `~/.lincona/logs/<id>.log` plaintext run log.
 - Provider: OpenAI Responses API; user-selectable model + reasoning effort per session; streaming responses.
@@ -72,7 +72,8 @@ Model advertisement: both JSON and freeform apply_patch appear as separate tools
 
 ## Slash Commands (during chat)
 - `/newsession` – end current, start fresh (new session id, clears history).
-- `/model <id>` – switch model for subsequent turns.
+- `/model:list` – print allowed models (from config).
+- `/model:set <id>` – switch model for subsequent turns (must be in allowed list).
 - `/reasoning <level>` – set reasoning effort (pass-through to Responses API).
 - `/approvals <never|on-request|always>` – set approval policy (stored in session state; default `never`).
 - `/fsmode <restricted|unrestricted>` – toggle filesystem boundary.
@@ -81,7 +82,8 @@ Model advertisement: both JSON and freeform apply_patch appear as separate tools
 ## Config (`~/.lincona/config.toml`)
 ```toml
 api_key = "..."               # or use env OPENAI_API_KEY
-model = "gpt-4.1"             # default
+model = "gpt-5.1-codex-mini"  # default
+allowed_models = ["gpt-5","gpt-5-codex","gpt-5-mini","gpt-5-nano","gpt-5-pro","gpt-5.1","gpt-5.1-codex","gpt-5.1-codex-mini"]
 reasoning_effort = "medium"   # per Responses API
 fs_mode = "restricted"        # or unrestricted
 approval_policy = "never"     # never|on-request|always

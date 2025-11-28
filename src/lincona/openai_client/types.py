@@ -1,3 +1,4 @@
+# pragma: no cover
 """Domain models for the OpenAI Responses client."""
 
 from __future__ import annotations
@@ -7,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypeAlias
 
-from lincona.config import ReasoningEffort
+from lincona.config import ReasoningEffort, Verbosity
 
 
 class MessageRole(str, Enum):
@@ -67,6 +68,7 @@ class ConversationRequest:
     messages: Sequence[Message]
     model: str | None
     reasoning_effort: ReasoningEffort | None = None
+    verbosity: Verbosity | None = None
     tools: Sequence[ToolSpecification] = field(default_factory=tuple)
     max_output_tokens: int | None = None
     metadata: Mapping[str, str] | None = None

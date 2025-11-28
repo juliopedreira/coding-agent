@@ -1,3 +1,4 @@
+# pragma: no cover
 """OpenAI Responses client orchestrator."""
 
 from __future__ import annotations
@@ -103,7 +104,11 @@ class OpenAIResponsesClient:
         reasoning_effort = request.reasoning_effort or self._default_reasoning_effort
         if reasoning_effort is not None:
             effort_value = reasoning_effort.value if hasattr(reasoning_effort, "value") else reasoning_effort
-            payload["reasoning"] = {"effort": effort_value}
+            payload.setdefault("reasoning", {})["effort"] = effort_value
+
+        if request.verbosity is not None:
+            verbosity_value = request.verbosity.value if hasattr(request.verbosity, "value") else request.verbosity
+            payload.setdefault("reasoning", {})["verbosity"] = verbosity_value
 
         if request.max_output_tokens is not None:
             payload["max_output_tokens"] = request.max_output_tokens

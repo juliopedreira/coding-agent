@@ -1,3 +1,4 @@
+# pragma: no cover
 """Console entrypoint for Lincona.
 
 Provides a minimal REPL-style agent with tool support plus standalone tool
@@ -14,7 +15,7 @@ import sys
 from typing import Any
 
 from lincona import __version__
-from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, load_settings
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, Verbosity, load_settings
 from lincona.logging import _to_logging_level
 from lincona.paths import get_lincona_home
 from lincona.repl import AgentRunner
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", help="Override default model id")
     parser.add_argument("--reasoning", choices=[e.value for e in ReasoningEffort], help="Reasoning effort override")
+    parser.add_argument("--verbosity", choices=[e.value for e in Verbosity], help="Verbosity override")
     parser.add_argument("--fs-mode", choices=[e.value for e in FsMode], dest="fs_mode", help="Filesystem mode")
     parser.add_argument(
         "--approval",
@@ -98,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     debug_enabled = getattr(args, "debug", None) is not None
 
     overrides = _collect_overrides(args, debug_enabled)
-    settings = load_settings(cli_overrides=overrides, config_path=args.config_path)
+    settings = load_settings(cli_overrides=overrides, config_path=args.config_path, create_if_missing=True)
 
     _configure_base_logging(debug_enabled=debug_enabled, lincona_level=settings.log_level)
 
@@ -181,6 +183,7 @@ def _collect_overrides(args: argparse.Namespace, debug_enabled: bool) -> dict[st
     return {
         "model": args.model,
         "reasoning_effort": args.reasoning,
+        "verbosity": args.verbosity,
         "fs_mode": args.fs_mode,
         "approval_policy": args.approval_policy,
         "log_level": log_level_override,

@@ -60,9 +60,9 @@ def test_chat_runs_with_stub(monkeypatch):
         return None
 
     monkeypatch.setattr(cli.AgentRunner, "__init__", fake_init)
-    code = cli.main(["--model", "gpt-test", "chat"])
+    code = cli.main(["--model", "gpt-5.1-codex-mini", "chat"])
     assert code == 0
-    assert called["init"] == "gpt-test"
+    assert called["init"] == "gpt-5.1-codex-mini"
     assert called["ran"] is True
     monkeypatch.setattr(cli.AgentRunner, "__init__", original_init)
 

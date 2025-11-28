@@ -3,7 +3,7 @@ import io
 
 import pytest
 
-from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, ModelCapabilities, ReasoningEffort, Settings, Verbosity
 from lincona.openai_client.types import ToolCallPayload
 from lincona.repl import AgentRunner, _ToolCallBuffer
 from lincona.tools.apply_patch import PatchResult
@@ -30,10 +30,30 @@ class SequenceTransport:
 
 @pytest.fixture()
 def settings():
+    models = {
+        "gpt-5.1-codex-mini": ModelCapabilities(
+            reasoning_effort=(
+                ReasoningEffort.NONE,
+                ReasoningEffort.MINIMAL,
+                ReasoningEffort.LOW,
+                ReasoningEffort.MEDIUM,
+                ReasoningEffort.HIGH,
+            ),
+            default_reasoning=ReasoningEffort.MINIMAL,
+            verbosity=(
+                Verbosity.LOW,
+                Verbosity.MEDIUM,
+                Verbosity.HIGH,
+            ),
+            default_verbosity=Verbosity.MEDIUM,
+        )
+    }
     return Settings(
         api_key="test",
-        model="gpt-4.1-mini",
-        reasoning_effort=ReasoningEffort.LOW,
+        model="gpt-5.1-codex-mini",
+        reasoning_effort=ReasoningEffort.MINIMAL,
+        verbosity=Verbosity.MEDIUM,
+        models=models,
         fs_mode=FsMode.UNRESTRICTED,
         approval_policy=ApprovalPolicy.NEVER,
         log_level=LogLevel.ERROR,
@@ -118,11 +138,17 @@ def test_slash_commands_update_state(settings, monkeypatch, tmp_path):
     transport = SequenceTransport([['data: {"type":"response.done"}']])
     runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
 
-    asyncio.run(runner._handle_slash("/model new-model"))
-    assert runner.settings.model == "new-model"
+    asyncio.run(runner._handle_slash("/model:set gpt-5.1-codex-mini:minimal:low"))
+    assert runner.settings.model == "gpt-5.1-codex-mini"
+    assert runner.settings.reasoning_effort.value == "minimal"
+    assert runner.settings.verbosity.value == "low"
 
-    asyncio.run(runner._handle_slash("/reasoning high"))
-    assert runner.settings.reasoning_effort.value == "high"
+    asyncio.run(runner._handle_slash("/reasoning none"))
+    assert runner.settings.reasoning_effort.value == "none"
+
+    # invalid reasoning for model
+    asyncio.run(runner._handle_slash("/model:set gpt-5.1-codex-mini:unknown"))
+    assert runner.settings.reasoning_effort.value == "none"
 
     asyncio.run(runner._handle_slash("/approvals never"))
     assert runner.approval_policy == ApprovalPolicy.NEVER
@@ -151,3 +177,44 @@ def test_execute_tools_serializes_patch_result(settings, tmp_path):
         [_ToolCallBuffer(tool_call=ToolCallPayload(id="p1", name="apply_patch_json", arguments="{}"), arguments="{}")]
     )
     assert any("x.txt" in m.content for m, _ in msgs)
+
+
+def test_model_commands_list_and_set_validation(settings, monkeypatch, tmp_path):
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
+    transport = SequenceTransport([['data: {"type":"response.done"}']])
+    runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
+
+    buffer = io.StringIO()
+    monkeypatch.setattr("sys.stdout", buffer)
+
+    asyncio.run(runner._handle_slash("/model:list"))
+    output = buffer.getvalue()
+    assert "Available models:" in output
+    assert settings.model in output
+
+    buffer.truncate(0)
+    buffer.seek(0)
+    asyncio.run(runner._handle_slash("/model:set unknown-model"))
+    assert runner.settings.model == settings.model  # unchanged
+    assert "not configured" in buffer.getvalue()
+
+
+def test_model_set_rejects_unsupported_verbosity(settings, monkeypatch, tmp_path):
+    # remove verbosity support to force rejection
+    stripped_models = {
+        "gpt-5.1-codex-mini": ModelCapabilities(
+            reasoning_effort=settings.models["gpt-5.1-codex-mini"].reasoning_effort,
+            default_reasoning=settings.models["gpt-5.1-codex-mini"].default_reasoning,
+            verbosity=(),
+            default_verbosity=None,
+        )
+    }
+    patched_settings = Settings(**{**settings.model_dump(), "models": stripped_models})
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
+    transport = SequenceTransport([['data: {"type":"response.done"}']])
+    runner = AgentRunner(patched_settings, transport=transport, boundary_root=tmp_path)
+    out = io.StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+
+    asyncio.run(runner._handle_slash("/model:set gpt-5.1-codex-mini:none:low"))
+    assert "verbosity 'low' not supported" in out.getvalue()

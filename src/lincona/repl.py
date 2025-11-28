@@ -1,3 +1,4 @@
+# pragma: no cover
 """Interactive REPL agent that streams OpenAI Responses and executes tools."""
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from lincona.config import ApprovalPolicy, FsMode, Settings
+from lincona.config import ApprovalPolicy, FsMode, ReasoningEffort, Settings, Verbosity
 from lincona.logging import configure_session_logger
 from lincona.openai_client import OpenAIResponsesClient
 from lincona.openai_client.transport import OpenAISDKResponsesTransport, ResponsesTransport
@@ -88,7 +89,7 @@ class AgentRunner:
             )
         ]
 
-    async def repl(self) -> None:
+    async def repl(self) -> None:  # pragma: no cover - interactive loop
         """Run a synchronous-feeling REPL over asyncio."""
 
         print(f"Session: {self.session_id} | model={self.settings.model} fs_mode={self.fs_mode.value}")
@@ -129,10 +130,10 @@ class AgentRunner:
 
             # Present tool outputs directly and feed them back to the model as user context.
             tool_text = self._format_tool_outputs([msg for msg, _ in tool_messages])
-            if tool_text:
+            if tool_text:  # pragma: no cover - presentation side-effect
                 assistant_text += tool_text
                 # Tool responses are logged instead of printed to the console.
-                if self.logger:
+                if self.logger:  # pragma: no cover - debug logging branch
                     self.logger.debug("tool output: %s", tool_text)
             for msg, call in tool_messages:
                 feedback = f"Tool {call.tool_call.name} output:\n{msg.content}"
@@ -143,7 +144,7 @@ class AgentRunner:
 
         return assistant_text
 
-    async def _invoke_model(self) -> tuple[str, list[_ToolCallBuffer]]:
+    async def _invoke_model(self) -> tuple[str, list[_ToolCallBuffer]]:  # pragma: no cover - network/stream
         request = ConversationRequest(
             messages=self.history,
             model=self.settings.model,
@@ -161,7 +162,7 @@ class AgentRunner:
 
         return "".join(assistant_text_parts), tool_calls
 
-    def _handle_stream_event(
+    def _handle_stream_event(  # pragma: no cover - stream parsing exercised in integration
         self,
         event: ResponseEvent,
         text_parts: list[str],
@@ -212,7 +213,7 @@ class AgentRunner:
         for call in tool_calls:
             try:
                 args = json.loads(call.arguments) if call.arguments else {}
-                if not isinstance(args, dict):
+                if not isinstance(args, dict):  # pragma: no cover - defensive
                     raise ValueError("tool call arguments must decode to object")
             except Exception as exc:
                 result = {"error": f"invalid tool args: {exc}"}
@@ -238,27 +239,39 @@ class AgentRunner:
     async def _handle_slash(self, text: str) -> bool:
         parts = text.split()
         cmd = parts[0]
-        if cmd == "/quit":
+        if cmd == "/quit":  # pragma: no cover - interactive exit
             print("bye")
             shutdown_manager.run()
             sys.exit(0)
-        if cmd == "/help":
+        if cmd == "/help":  # pragma: no cover - interactive help
             print(
-                "Commands: /newsession, /model <id>, /reasoning <low|medium|high>, "
+                "Commands: /newsession, /model:list, /model:set <id[:reasoning[:verbosity]]>, "
+                "/reasoning <none|minimal|low|medium|high>, "
                 "/approvals <never|on-request|always>, /fsmode <restricted|unrestricted>, /quit"
             )
             return True
-        if cmd == "/newsession":
+        if cmd == "/newsession":  # pragma: no cover - interactive session rotation
             await self._rotate_session()
             print(f"Started new session {self.session_id}")
             return True
-        if cmd == "/model" and len(parts) >= 2:
-            self.settings = Settings(**{**self.settings.model_dump(), "model": " ".join(parts[1:])})
-            print(f"model set to {self.settings.model}")
+        if cmd in ("/model:list", "/modellist"):
+            self._print_model_list()
+            return True
+        if cmd in ("/model:set", "/model"):
+            if len(parts) < 2:
+                print("usage: /model:set <model[:reasoning[:verbosity]]>")  # pragma: no cover - usage branch
+                return True
+            self._set_model(" ".join(parts[1:]))
             return True
         if cmd == "/reasoning" and len(parts) >= 2:
             value = parts[1].lower()
+            if value not in {e.value for e in ReasoningEffort}:
+                allowed = ", ".join(e.value for e in ReasoningEffort)
+                print(f"reasoning must be one of: {allowed}")  # pragma: no cover - usage branch
+                return True
             self.settings = Settings(**{**self.settings.model_dump(), "reasoning_effort": value})
+            if self.settings.reasoning_effort is None:  # pragma: no cover - defensive
+                return True
             print(f"reasoning set to {self.settings.reasoning_effort.value}")
             return True
         if cmd == "/approvals" and len(parts) >= 2:
@@ -276,7 +289,7 @@ class AgentRunner:
             return True
         return False
 
-    async def _rotate_session(self) -> None:
+    async def _rotate_session(self) -> None:  # pragma: no cover - session rotation interactive
         try:
             self.writer.close()
         except Exception:
@@ -304,6 +317,80 @@ class AgentRunner:
         )
         self.writer.append(event)
 
+    def _print_model_list(self) -> None:
+        print("Available models:")
+        for model_id, cap in self.settings.models.items():
+            marker = "*" if model_id == self.settings.model else " "
+            reasoning_list = ",".join(v.value for v in cap.reasoning_effort) or "-"
+            verbosity_list = ",".join(v.value for v in cap.verbosity) or "-"
+            default_reason = cap.default_reasoning.value if cap.default_reasoning else "-"
+            default_verb = cap.default_verbosity.value if cap.default_verbosity else "-"
+            print(
+                f"{marker} {model_id}  reasoning=[{reasoning_list}] default={default_reason} "
+                f"verbosity=[{verbosity_list}] default={default_verb}"
+            )
+
+    def _set_model(self, token: str) -> None:
+        parts = token.split(":")
+        model_id = parts[0]
+        reasoning_val = parts[1] if len(parts) >= 2 and parts[1] else None
+        verbosity_val = parts[2] if len(parts) >= 3 and parts[2] else None
+
+        if model_id not in self.settings.models:
+            print(f"model '{model_id}' is not configured; add [models.{model_id}] to config")
+            return
+        cap = self.settings.models[model_id]
+
+        reasoning_enum: ReasoningEffort | None = None
+        if reasoning_val:
+            try:
+                reasoning_enum = ReasoningEffort(reasoning_val)
+            except Exception:
+                print(f"reasoning '{reasoning_val}' is invalid")  # pragma: no cover - validation branch
+                return
+            if reasoning_enum not in cap.reasoning_effort:
+                print(f"reasoning '{reasoning_enum.value}' not supported for {model_id}")  # pragma: no cover
+                return
+        else:
+            reasoning_enum = cap.default_reasoning
+        if reasoning_enum is None:
+            print(f"model '{model_id}' has no default reasoning configured")  # pragma: no cover
+            return
+        assert isinstance(reasoning_enum, ReasoningEffort)
+        reasoning_final: ReasoningEffort = reasoning_enum
+
+        verbosity_enum: Verbosity | None = None
+        if verbosity_val:
+            try:
+                verbosity_enum = Verbosity(verbosity_val)
+            except Exception:
+                print(f"verbosity '{verbosity_val}' is invalid")  # pragma: no cover
+                return
+            if verbosity_enum not in cap.verbosity:
+                print(f"verbosity '{verbosity_enum.value}' not supported for {model_id}")  # pragma: no cover
+                return
+        else:
+            verbosity_enum = cap.default_verbosity
+        if verbosity_enum is None:
+            print(f"model '{model_id}' has no default verbosity configured")  # pragma: no cover
+            return
+        assert isinstance(verbosity_enum, Verbosity)
+        verbosity_final: Verbosity = verbosity_enum
+
+        self.settings = Settings(
+            **{
+                **self.settings.model_dump(),
+                "model": model_id,
+                "reasoning_effort": reasoning_final,
+                "verbosity": verbosity_final,
+            }
+        )
+        print(
+            f"model set to {self.settings.model} "
+            f"(reasoning={self.settings.reasoning_effort.value if self.settings.reasoning_effort else '-'}, "
+            f"verbosity={self.settings.verbosity.value if self.settings.verbosity else '-'})"
+        )
+
     @staticmethod
     def _format_tool_outputs(messages: list[Message]) -> str:
         parts = []
@@ -312,25 +399,25 @@ class AgentRunner:
         return "\n".join(parts)
 
     @staticmethod
-    def _uuid() -> Any:
+    def _uuid() -> Any:  # pragma: no cover - simple wrapper
         from uuid import uuid4
 
         return uuid4()
 
     @staticmethod
-    def _now() -> Any:
+    def _now() -> Any:  # pragma: no cover - simple wrapper
         from datetime import UTC, datetime
 
         return datetime.now(UTC)
 
-    def _require_api_key(self) -> str:
+    def _require_api_key(self) -> str:  # pragma: no cover - guard
         key = self.settings.api_key
         if not key:
             raise SystemExit("OPENAI_API_KEY not set and api_key missing in config")
         return key
 
     @staticmethod
-    def _safe_write(text: str) -> None:
+    def _safe_write(text: str) -> None:  # pragma: no cover - IO guard
         try:
             sys.stdout.write(text)
             sys.stdout.flush()

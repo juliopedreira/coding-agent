@@ -25,7 +25,7 @@ def test_shell_timeout(tmp_path: Path) -> None:
 def test_shell_truncation(tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     text = "x" * 20_000
-    result = run_shell(boundary, f"python - <<'PY'\nprint('{text}')\nPY", max_bytes=1000, max_lines=5)
+    result = run_shell(boundary, f"python3 - <<'PY'\nprint('{text}')\nPY", max_bytes=1000, max_lines=5)
 
     assert result["stdout_truncated"] is True
     assert result["stdout"].endswith("[truncated]")

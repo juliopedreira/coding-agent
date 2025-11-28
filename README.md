@@ -2,6 +2,8 @@
 
 Linux-only interactive coding agent CLI.
 
+Audience: users/operators (how to install, configure, run).
+
 ## Prerequisites
 - Python 3.11+
 - Poetry (`pipx install poetry` recommended)
@@ -39,61 +41,39 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 ```
 
 ## Quick start
+- Set `OPENAI_API_KEY` in your environment.
 - Show version: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona --version`
-- Start chat REPL (default): `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona chat`
-  - Set `OPENAI_API_KEY` in your environment.
-  - Slash commands: `/help`, `/newsession`, `/model <id>`, `/reasoning <low|medium|high>`, `/approvals <never|on-request|always>`, `/fsmode <restricted|unrestricted>`, `/quit`.
+- Start chat: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona chat`
+  - Slash commands: `/help`, `/newsession`, `/model:list`, `/model:set <id>`, `/reasoning <low|medium|high>`, `/approvals <never|on-request|always>`, `/fsmode <restricted|unrestricted>`, `/quit`.
 - Run a tool directly: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona tool list_dir --arg path=. --arg depth=1`
 - Inspect sessions: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona sessions list`
 
 ## Configuration & data directories
 - Base directory: `~/.lincona/` (override with env `LINCONA_HOME=/custom/path`).
-- Files:
-  - `config.toml` – persisted defaults (see docs/mvp_00/03_EPIC_02.md).
+- Files (created on first run if missing):
+  - `config.toml` – persisted defaults.
   - `sessions/<id>.jsonl` – append-only session transcripts.
   - `logs/<id>.log` – per-session plaintext logs (truncated to 5MB by default).
 - Environment: `OPENAI_API_KEY` overrides `api_key` in config.
+- Models: default `gpt-5.1-codex-mini`; allowed set by `[model].allowed` (defaults to `["gpt-5","gpt-5-codex","gpt-5-mini","gpt-5-nano","gpt-5-pro","gpt-5.1","gpt-5.1-codex","gpt-5.1-codex-mini"]`). `/model:set` must pick from that list.
 
-## Architecture quick peek
-- Config & paths: `lincona.config`, `lincona.paths` load persisted defaults from `~/.lincona/config.toml` with precedence CLI > env > file > defaults.
-- Persistence: `lincona.sessions` manages JSONL event streams and IDs; `lincona.logging` creates per-session logs with truncation.
-- Shutdown: `lincona.shutdown.ShutdownManager` closes writers/loggers safely on SIGINT/SIGTERM/atexit.
-- OpenAI client: `lincona.openai_client` offers an async Responses client with streaming parser, pluggable transports (HTTP/mock), back-pressure helper, error events, logging hook, and base URL override.
-- Tools core (Epic 4 in progress): `lincona.tools` implements filesystem boundaries, output limits, file tools (`list_dir`, `read_file`, `grep_files`), patch apply (unified + freeform), shell and PTY exec, approval guard, and tool router.
-- CLI: `lincona.cli` stub (TUI and tooling arrive in later epics).
-See `ARCHITECTURE.md` for details.
-
-## OpenAI Responses client (Epic 3)
-- Package: `lincona.openai_client`.
-- Typical usage:
-```python
-from lincona.config import load_settings
-from lincona.openai_client import (
-    HttpResponsesTransport,
-    OpenAIResponsesClient,
-    ConversationRequest,
-    Message,
-    MessageRole,
-)
-
-settings = load_settings()
-transport = HttpResponsesTransport(api_key=settings.api_key or "test-key")
-client = OpenAIResponsesClient(
-    transport,
-    default_model=settings.model,
-    default_reasoning_effort=settings.reasoning_effort.value,
-    default_timeout=60.0,
-)
-
-request = ConversationRequest(
-    messages=[Message(role=MessageRole.USER, content="Hello")],
-    model=None,  # falls back to default_model above
-)
-
-async for event in client.submit(request):
-    ...  # handle TextDelta/ToolCall*/MessageDone/ErrorEvent
+Example `~/.lincona/config.toml`:
+```toml
+api_key = "sk-..."                    # or use env OPENAI_API_KEY
+[model]
+id = "gpt-5.1-codex-mini"
+allowed = ["gpt-5","gpt-5-codex","gpt-5-mini","gpt-5-nano","gpt-5-pro","gpt-5.1","gpt-5.1-codex","gpt-5.1-codex-mini"]
+reasoning_effort = "medium"
+[runtime]
+fs_mode = "restricted"
+approval_policy = "on-request"
+[logging]
+log_level = "info"
 ```
-- Swap `HttpResponsesTransport` with `MockResponsesTransport([...])` in tests to feed canned SSE chunks; parsing is handled by `parse_stream`.
+
+## Where to learn more
+- Developer internals and module layout: see `ARCHITECTURE.md`.
+- Additional specs: `docs/mvp_00/`.
 
 ## Maintenance tips
 - After changing dependencies, regenerate the lockfile: `make lock`

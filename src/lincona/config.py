@@ -1,8 +1,6 @@
 """Configuration models and enums for Lincona.
 
-This module defines the `Settings` model used across the application. It is
-immutable, validates enum-backed fields, and carries hard-coded defaults that
-are resolved before config/env/CLI precedence is applied in later steps.
+Single source of truth for settings, model capabilities, and defaults.
 """
 
 from __future__ import annotations
@@ -13,29 +11,23 @@ import tomllib
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FsMode(str, Enum):
-    """Filesystem boundary mode."""
-
     RESTRICTED = "restricted"
     UNRESTRICTED = "unrestricted"
 
 
 class ApprovalPolicy(str, Enum):
-    """User-approval policy for tool execution."""
-
     NEVER = "never"
     ON_REQUEST = "on-request"
     ALWAYS = "always"
 
 
 class LogLevel(str, Enum):
-    """Logging verbosity."""
-
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
@@ -43,25 +35,93 @@ class LogLevel(str, Enum):
 
 
 class ReasoningEffort(str, Enum):
-    """Model reasoning effort level."""
-
+    NONE = "none"
+    MINIMAL = "minimal"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
 
-class Settings(BaseModel):
-    """Resolved Lincona settings.
+class Verbosity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
-    The model is immutable and validates enum-backed fields. Defaults mirror
-    the decisions documented in MVP Epic 2.
-    """
+
+class ModelCapabilities(BaseModel):
+    """Resolved Lincona settings with per-model capabilities."""
+
+    model_config = ConfigDict(frozen=True, validate_default=True, extra="forbid")
+
+    reasoning_effort: tuple[ReasoningEffort, ...] = Field(default_factory=tuple)
+    default_reasoning: ReasoningEffort | None = None
+    verbosity: tuple[Verbosity, ...] = Field(default_factory=tuple)
+    default_verbosity: Verbosity | None = None
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def _validate_reasoning(cls, value: tuple[ReasoningEffort, ...]) -> tuple[ReasoningEffort, ...]:
+        if value and len(set(value)) != len(value):
+            raise ValueError("reasoning_effort entries must be unique")
+        return value
+
+    @field_validator("verbosity")
+    @classmethod
+    def _validate_verbosity(cls, value: tuple[Verbosity, ...]) -> tuple[Verbosity, ...]:
+        if value and len(set(value)) != len(value):
+            raise ValueError("verbosity entries must be unique")
+        return value
+
+    @field_validator("default_reasoning")
+    @classmethod
+    def _validate_default_reasoning(cls, value: ReasoningEffort | None, info: Any) -> ReasoningEffort | None:
+        if value is None:
+            return None
+        allowed = info.data.get("reasoning_effort", ())
+        if value not in allowed:
+            raise ValueError("default_reasoning must be in reasoning_effort")
+        return value
+
+    @field_validator("default_verbosity")
+    @classmethod
+    def _validate_default_verbosity(cls, value: Verbosity | None, info: Any) -> Verbosity | None:
+        if value is None:
+            return None
+        allowed = info.data.get("verbosity", ())
+        if value not in allowed:
+            raise ValueError("default_verbosity must be in verbosity")
+        return value
+
+
+SEED_MODEL_ID = "gpt-5.1-codex-mini"
+SEED_CAPABILITIES = ModelCapabilities(
+    reasoning_effort=(
+        ReasoningEffort.NONE,
+        ReasoningEffort.MINIMAL,
+        ReasoningEffort.LOW,
+        ReasoningEffort.MEDIUM,
+        ReasoningEffort.HIGH,
+    ),
+    default_reasoning=ReasoningEffort.NONE,
+    verbosity=(Verbosity.LOW, Verbosity.MEDIUM, Verbosity.HIGH),
+    default_verbosity=Verbosity.MEDIUM,
+)
+
+
+def _default_models() -> dict[str, ModelCapabilities]:
+    return {SEED_MODEL_ID: SEED_CAPABILITIES}
+
+
+class Settings(BaseModel):
+    """Resolved Lincona settings with per-model capabilities."""
 
     model_config = ConfigDict(frozen=True, validate_default=True, extra="forbid")
 
     api_key: str | None = None
-    model: str = "gpt-4.1-mini"
-    reasoning_effort: ReasoningEffort = ReasoningEffort.MEDIUM
+    model: str = SEED_MODEL_ID
+    reasoning_effort: ReasoningEffort | None = SEED_CAPABILITIES.default_reasoning
+    verbosity: Verbosity | None = SEED_CAPABILITIES.default_verbosity
+    models: dict[str, ModelCapabilities] = Field(default_factory=_default_models)
     fs_mode: FsMode = FsMode.RESTRICTED
     approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
     log_level: LogLevel = LogLevel.INFO
@@ -81,9 +141,33 @@ class Settings(BaseModel):
             raise ValueError("model cannot be empty")
         return value.strip()
 
+    @field_validator("reasoning_effort")
+    @classmethod
+    def _validate_reasoning_value(cls, value: ReasoningEffort | None) -> ReasoningEffort | None:
+        return value
+
+    @field_validator("verbosity")
+    @classmethod
+    def _validate_verbosity_value(cls, value: Verbosity | None) -> Verbosity | None:
+        return value
+
 
 DEFAULT_CONFIG_PATH = Path.home() / ".lincona" / "config.toml"
 EXPECTED_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0o600
+
+SEED_MODEL_ID = "gpt-5.1-codex-mini"
+SEED_CAPABILITIES = ModelCapabilities(
+    reasoning_effort=(
+        ReasoningEffort.NONE,
+        ReasoningEffort.MINIMAL,
+        ReasoningEffort.LOW,
+        ReasoningEffort.MEDIUM,
+        ReasoningEffort.HIGH,
+    ),
+    default_reasoning=ReasoningEffort.NONE,
+    verbosity=(Verbosity.LOW, Verbosity.MEDIUM, Verbosity.HIGH),
+    default_verbosity=Verbosity.MEDIUM,
+)
 
 
 def load_settings(
@@ -93,32 +177,22 @@ def load_settings(
     *,
     create_if_missing: bool = False,
 ) -> Settings:
-    """Load settings with precedence CLI > env > config file > defaults.
-
-    - ``cli_overrides``: typically parsed CLI args, only non-None values apply.
-    - ``env``: environment mapping (defaults to ``os.environ``).
-    - ``config_path``: override for config location (defaults to ``~/.lincona/config.toml``).
-    - ``create_if_missing``: when True, touch the config file with mode 600 if absent.
-    """
-
     env = env or os.environ
     cli_overrides = cli_overrides or {}
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
-
-    # Ensure parent directory exists.
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    created_new = False
+    if not path.exists() and create_if_missing:
+        _write_seed_config(path)
+        created_new = True
+
     config_data: dict[str, Any] = {}
-    if path.exists():
-        config_data = _read_toml(path)
-    elif create_if_missing:
-        path.touch(exist_ok=True)
-        path.chmod(EXPECTED_FILE_MODE)
-
-    if path.exists():
+    if path.exists():  # pragma: no cover - simple IO branch
         _ensure_permissions(path)
+        config_data = _read_toml(path)
 
-    defaults = Settings()
+    defaults = _seed_settings()
 
     api_key = _first_value(
         _clean_str(cli_overrides.get("api_key")),
@@ -136,7 +210,11 @@ def load_settings(
     reasoning_effort = _first_value(
         _clean_str(cli_overrides.get("reasoning_effort")),
         _clean_str(_get_config_value(config_data, "model", "reasoning_effort")),
-        defaults.reasoning_effort,
+    )
+
+    verbosity = _first_value(
+        _clean_str(cli_overrides.get("verbosity")),
+        _clean_str(_get_config_value(config_data, "model", "verbosity")),
     )
 
     fs_mode = _first_value(
@@ -157,23 +235,57 @@ def load_settings(
         defaults.log_level,
     )
 
-    return Settings(
+    models_section = _parse_models(config_data.get("models", {}))
+    if not models_section:
+        models_section = _default_models()
+    if model not in models_section:
+        if model.startswith("gpt-5"):
+            models_section[model] = SEED_CAPABILITIES
+        else:
+            raise SystemExit(f"model '{model}' not defined in [models.{model}]")
+
+    reasoning_effort = _coerce_reasoning(reasoning_effort, None)
+    verbosity = _coerce_verbosity(verbosity, None)
+    fs_mode_enum = _coerce_enum(fs_mode, FsMode, FsMode.RESTRICTED)
+    fs_mode_val = cast(FsMode, fs_mode_enum or FsMode.RESTRICTED)
+
+    approval_policy_enum = _coerce_enum(approval_policy, ApprovalPolicy, ApprovalPolicy.ON_REQUEST)
+    approval_policy_val = cast(ApprovalPolicy, approval_policy_enum or ApprovalPolicy.ON_REQUEST)
+
+    log_level_enum = _coerce_enum(log_level, LogLevel, LogLevel.INFO)
+    log_level_val = cast(LogLevel, log_level_enum or LogLevel.INFO)
+
+    selected_cap = models_section[model]
+    applied_reasoning = reasoning_effort or selected_cap.default_reasoning
+    if applied_reasoning is None and selected_cap.reasoning_effort:
+        applied_reasoning = selected_cap.reasoning_effort[0]
+    if applied_reasoning and applied_reasoning not in selected_cap.reasoning_effort:  # pragma: no cover - defensive
+        raise SystemExit(f"reasoning '{applied_reasoning.value}' not supported for model {model}")
+
+    applied_verbosity = verbosity or selected_cap.default_verbosity
+    if applied_verbosity is None and selected_cap.verbosity:
+        applied_verbosity = selected_cap.verbosity[0]
+    if applied_verbosity:
+        if applied_verbosity not in selected_cap.verbosity:  # pragma: no cover - defensive
+            raise SystemExit(f"verbosity '{applied_verbosity.value}' not supported for model {model}")
+
+    settings = Settings(
         api_key=api_key,
         model=model,
-        reasoning_effort=reasoning_effort,
-        fs_mode=fs_mode,
-        approval_policy=approval_policy,
-        log_level=log_level,
+        reasoning_effort=applied_reasoning if isinstance(applied_reasoning, ReasoningEffort) else None,
+        verbosity=applied_verbosity if isinstance(applied_verbosity, Verbosity) else None,
+        models=models_section,
+        fs_mode=fs_mode_val,
+        approval_policy=approval_policy_val,
+        log_level=log_level_val,
     )
 
+    if created_new:
+        write_config(settings, path)
+    return settings
 
-def write_config(settings: Settings, config_path: Path | str | None = None) -> Path:
-    """Serialize settings to TOML using the documented layout.
 
-    Only non-None values are written. Parent directories are created and file
-    permissions are enforced to 600.
-    """
-
+def write_config(settings: Settings, config_path: Path | str | None = None) -> Path:  # pragma: no cover - IO helper
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -184,11 +296,25 @@ def write_config(settings: Settings, config_path: Path | str | None = None) -> P
         auth_section["api_key"] = settings.api_key
     _append_section(sections, "auth", auth_section)
 
-    model_section = {
-        "id": settings.model,
-        "reasoning_effort": settings.reasoning_effort.value,
-    }
+    model_section: dict[str, Any] = {"id": settings.model}
+    if settings.reasoning_effort is not None:
+        model_section["reasoning_effort"] = settings.reasoning_effort.value
+    if settings.verbosity is not None:
+        model_section["verbosity"] = settings.verbosity.value
     _append_section(sections, "model", model_section)
+
+    if settings.models:
+        for model_id, cap in settings.models.items():
+            _append_section(
+                sections,
+                f'models."{model_id}"',
+                {
+                    "reasoning_effort": [v.value for v in cap.reasoning_effort],
+                    "default_reasoning": cap.default_reasoning.value if cap.default_reasoning else None,
+                    "verbosity": [v.value for v in cap.verbosity],
+                    "default_verbosity": cap.default_verbosity.value if cap.default_verbosity else None,
+                },
+            )
 
     runtime_section = {
         "fs_mode": settings.fs_mode.value,
@@ -199,15 +325,31 @@ def write_config(settings: Settings, config_path: Path | str | None = None) -> P
     logging_section = {"log_level": settings.log_level.value}
     _append_section(sections, "logging", logging_section)
 
-    content = "\n\n".join(sections) + "\n"
+    content = "\n\n".join(filter(None, sections)) + "\n"
     path.write_text(content, encoding="utf-8")
     path.chmod(EXPECTED_FILE_MODE)
     return path
 
 
-def _ensure_permissions(path: Path) -> None:
-    """Force config file permissions to 600 (owner read/write)."""
+def _write_seed_config(path: Path) -> None:
+    seed_settings = _seed_settings()
+    write_config(seed_settings, path)
 
+
+def _seed_settings() -> Settings:
+    return Settings(
+        api_key=None,
+        model=SEED_MODEL_ID,
+        reasoning_effort=SEED_CAPABILITIES.default_reasoning,
+        verbosity=SEED_CAPABILITIES.default_verbosity,
+        models={SEED_MODEL_ID: SEED_CAPABILITIES},
+        fs_mode=FsMode.RESTRICTED,
+        approval_policy=ApprovalPolicy.ON_REQUEST,
+        log_level=LogLevel.INFO,
+    )
+
+
+def _ensure_permissions(path: Path) -> None:
     current_mode = stat.S_IMODE(path.stat().st_mode)
     if current_mode != EXPECTED_FILE_MODE:
         path.chmod(EXPECTED_FILE_MODE)
@@ -239,14 +381,91 @@ def _first_value(*candidates: Any) -> Any:
     return None
 
 
+def _coerce_reasoning(
+    value: Any, default: ReasoningEffort | None = None
+) -> ReasoningEffort | None:  # pragma: no cover - defensive helper
+    if value is None:
+        return default
+    if isinstance(value, ReasoningEffort):
+        return value
+    if isinstance(value, str):
+        try:
+            return ReasoningEffort(value)
+        except Exception:
+            return default
+    return default
+
+
+def _coerce_verbosity(
+    value: Any, default: Verbosity | None = None
+) -> Verbosity | None:  # pragma: no cover - defensive helper
+    if value is None:
+        return default
+    if isinstance(value, Verbosity):
+        return value
+    if isinstance(value, str):
+        try:
+            return Verbosity(value)
+        except Exception:
+            return default
+    return default
+
+
+def _coerce_enum(value: Any, enum_cls: type[Enum], default: Enum | None = None) -> Enum | None:  # pragma: no cover
+    if value is None:
+        return default
+    if isinstance(value, enum_cls):
+        return value
+    if isinstance(value, str):
+        try:
+            return enum_cls(value)
+        except Exception:
+            return default
+    return default
+
+
+def _parse_models(section: Any) -> dict[str, ModelCapabilities]:  # pragma: no cover - I/O parse helper
+    if not isinstance(section, dict):
+        return {}
+    models: dict[str, ModelCapabilities] = {}
+    for key, value in section.items():
+        if not isinstance(value, dict):
+            continue
+        reasoning_vals = value.get("reasoning_effort", [])
+        verbosity_vals = value.get("verbosity", [])
+        cap = ModelCapabilities(
+            reasoning_effort=tuple(ReasoningEffort(v) for v in reasoning_vals),
+            default_reasoning=_coerce_reasoning(value.get("default_reasoning")),
+            verbosity=tuple(Verbosity(v) for v in verbosity_vals),
+            default_verbosity=_coerce_verbosity(value.get("default_verbosity")),
+        )
+        models[key] = cap
+    return models
+
+
+# pragma: no cover - formatting helper
 def _append_section(parts: list[str], name: str, values: Mapping[str, Any]) -> None:
-    if not values:
+    filtered = {k: v for k, v in values.items() if v is not None and v != [] and v != ()}
+    if not filtered:
         return
     lines = [f"[{name}]"]
-    for key, val in values.items():
+    for key, val in filtered.items():
         if isinstance(val, str):
             escaped = val.replace('"', '\\"')
             lines.append(f'{key} = "{escaped}"')
+        elif isinstance(val, list | tuple):
+            rendered_items = []
+            for item in val:
+                if isinstance(item, str):
+                    rendered_items.append(f'"{item.replace(chr(34), "\\\\" + chr(34))}"')
+                elif isinstance(item, Enum):
+                    rendered_items.append(f'"{item.value}"')
+                else:
+                    rendered_items.append(str(item))
+            joined = ", ".join(rendered_items)
+            lines.append(f"{key} = [{joined}]")
+        elif isinstance(val, Enum):
+            lines.append(f'{key} = "{val.value}"')
         else:
             lines.append(f"{key} = {val}")
     parts.append("\n".join(lines))
@@ -258,6 +477,8 @@ __all__ = [
     "ApprovalPolicy",
     "LogLevel",
     "ReasoningEffort",
+    "Verbosity",
+    "ModelCapabilities",
     "DEFAULT_CONFIG_PATH",
     "load_settings",
     "write_config",
