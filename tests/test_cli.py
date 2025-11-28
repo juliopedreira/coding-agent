@@ -67,6 +67,30 @@ def test_chat_runs_with_stub(monkeypatch):
     monkeypatch.setattr(cli.AgentRunner, "__init__", original_init)
 
 
+def test_show_models_capabilities(monkeypatch, capsys):
+    class FakeModel:
+        def __init__(self, id):
+            self.id = id
+
+    class FakeModels:
+        def list(self):
+            class Obj:
+                data = [FakeModel("gpt-5.1-codex-mini"), FakeModel("gpt-4o")]
+
+            return Obj()
+
+    class FakeClient:
+        def __init__(self, api_key=None):
+            self.models = FakeModels()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setattr(cli, "OpenAI", FakeClient)
+    rc = cli.main(["--show-models-capabilities"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "gpt-5.1-codex-mini" in out
+
+
 def test_sessions_list_show_rm(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
     sessions_dir = tmp_path / "home" / "sessions"

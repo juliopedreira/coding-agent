@@ -187,10 +187,10 @@ def test_model_commands_list_and_set_validation(settings, monkeypatch, tmp_path)
     buffer = io.StringIO()
     monkeypatch.setattr("sys.stdout", buffer)
 
-    asyncio.run(runner._handle_slash("/model:list"))
+    asyncio.run(runner._handle_slash("/model:list --json"))
     output = buffer.getvalue()
-    assert "Available models:" in output
-    assert settings.model in output
+    assert "gpt-5.1-codex-mini" in output
+    assert "reasoning_effort" in output
 
     buffer.truncate(0)
     buffer.seek(0)

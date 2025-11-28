@@ -255,7 +255,8 @@ class AgentRunner:
             print(f"Started new session {self.session_id}")
             return True
         if cmd in ("/model:list", "/modellist"):
-            self._print_model_list()
+            json_flag = len(parts) > 1 and parts[1] == "--json"
+            self._print_model_list(as_json=json_flag)
             return True
         if cmd in ("/model:set", "/model"):
             if len(parts) < 2:
@@ -317,16 +318,32 @@ class AgentRunner:
         )
         self.writer.append(event)
 
-    def _print_model_list(self) -> None:
-        print("Available models:")
+    def _print_model_list(self, *, as_json: bool = False) -> None:
+        rows: list[dict[str, Any]] = []
         for model_id, cap in self.settings.models.items():
-            marker = "*" if model_id == self.settings.model else " "
-            reasoning_list = ",".join(v.value for v in cap.reasoning_effort) or "-"
-            verbosity_list = ",".join(v.value for v in cap.verbosity) or "-"
-            default_reason = cap.default_reasoning.value if cap.default_reasoning else "-"
-            default_verb = cap.default_verbosity.value if cap.default_verbosity else "-"
+            rows.append(
+                {
+                    "model": model_id,
+                    "current": model_id == self.settings.model,
+                    "reasoning_effort": [v.value for v in cap.reasoning_effort],
+                    "default_reasoning": cap.default_reasoning.value if cap.default_reasoning else None,
+                    "verbosity": [v.value for v in cap.verbosity],
+                    "default_verbosity": cap.default_verbosity.value if cap.default_verbosity else None,
+                }
+            )
+        if as_json:
+            print(json.dumps(rows, indent=2))
+            return
+
+        print("Available models:")
+        for row in rows:
+            marker = "*" if row["current"] else " "
+            reasoning_list = ",".join(row["reasoning_effort"]) or "-"
+            verbosity_list = ",".join(row["verbosity"]) or "-"
+            default_reason = row["default_reasoning"] or "-"
+            default_verb = row["default_verbosity"] or "-"
             print(
-                f"{marker} {model_id}  reasoning=[{reasoning_list}] default={default_reason} "
+                f"{marker} {row['model']}  reasoning=[{reasoning_list}] default={default_reason} "
                 f"verbosity=[{verbosity_list}] default={default_verb}"
             )
 

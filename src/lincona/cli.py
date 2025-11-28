@@ -14,6 +14,7 @@ import json
 import sys
 from typing import Any
 
+from openai import OpenAI
 from lincona import __version__
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, Verbosity, load_settings
 from lincona.logging import _to_logging_level
@@ -61,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="log_level",
         help="Log level override",
     )
+    parser.add_argument(
+        "--show-models-capabilities",
+        action="store_true",
+        help="Query OpenAI models API and print capability table (fails if API unreachable).",
+    )
     parser.add_argument("--config-path", dest="config_path", help="Path to config.toml")
 
     subparsers = parser.add_subparsers(dest="command")
@@ -103,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings(cli_overrides=overrides, config_path=args.config_path, create_if_missing=True)
 
     _configure_base_logging(debug_enabled=debug_enabled, lincona_level=settings.log_level)
+
+    if args.show_models_capabilities:
+        return _run_show_models_capabilities(settings)
 
     command = args.command or "chat"
     if command == "chat":
@@ -188,6 +197,52 @@ def _collect_overrides(args: argparse.Namespace, debug_enabled: bool) -> dict[st
         "approval_policy": args.approval_policy,
         "log_level": log_level_override,
     }
+
+
+def _run_show_models_capabilities(settings: Settings) -> int:
+    if not settings.api_key:
+        print("OPENAI_API_KEY not set; cannot query models", file=sys.stderr)
+        return 1
+
+    client = OpenAI(api_key=settings.api_key)
+    try:
+        models = client.models.list()
+    except Exception as exc:  # pragma: no cover - network error surface
+        print(f"failed to fetch models: {exc}", file=sys.stderr)
+        return 1
+
+    reasoning = ["none", "minimal", "low", "medium", "high"]
+    verbosity = ["low", "medium", "high"]
+
+    rows: list[dict[str, Any]] = []
+    for m in models.data:
+        model_id = getattr(m, "id", "")
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        if not model_id.startswith("gpt-5"):
+            continue
+        rows.append(
+            {
+                "model": model_id,
+                "reasoning_effort": reasoning,
+                "default_reasoning": "none",
+                "verbosity": verbosity,
+                "default_verbosity": "medium",
+            }
+        )
+
+    if not rows:
+        print("no GPT-5 models found from API")
+        return 0
+
+    print("Model capabilities (GPT-5 family):")
+    for row in rows:
+        print(
+            f"{row['model']} reasoning={row['reasoning_effort']} "
+            f"default_reasoning={row['default_reasoning']} "
+            f"verbosity={row['verbosity']} default_verbosity={row['default_verbosity']}"
+        )
+    return 0
 
 
 def _configure_base_logging(*, debug_enabled: bool, lincona_level: LogLevel | str) -> None:
