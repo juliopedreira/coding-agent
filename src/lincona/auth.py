@@ -94,7 +94,7 @@ class ChatGPTCredentials:
             last_refresh = datetime.fromisoformat(str(data["last_refresh"]))
             expires_at_value = data.get("expires_at")
             expires_at = datetime.fromisoformat(str(expires_at_value)) if expires_at_value is not None else None
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             _LOGGER.warning("failed to load saved tokens: %s", exc)
             return None
         return cls(
@@ -107,12 +107,12 @@ class ChatGPTCredentials:
         )
 
 
-class _ThreadedCallbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):  # pragma: no cover - shim
+class _ThreadedCallbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
 
-class _LoginCoordinator:  # pragma: no cover - shim
+class _LoginCoordinator:
     def __init__(self, loop: asyncio.AbstractEventLoop, expected_state: str) -> None:
         self._loop = loop
         self._expected_state = expected_state
@@ -139,7 +139,7 @@ class _LoginCoordinator:  # pragma: no cover - shim
             self._loop.call_soon_threadsafe(self._future.set_exception, exc)
 
 
-class _CallbackHandler(http.server.BaseHTTPRequestHandler):  # pragma: no cover - network shim
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path != LOGIN_CALLBACK_PATH:
@@ -168,11 +168,11 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):  # pragma: no cover 
         self.server.coordinator.set_result(code)  # type: ignore[attr-defined]
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
-    def log_message(self, format: str, *args: object) -> None:  # pragma: no cover - avoid stdout spam
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 
-class _LoginSession:  # pragma: no cover - shim
+class _LoginSession:
     def __init__(
         self, server: _ThreadedCallbackServer, thread: threading.Thread, coordinator: _LoginCoordinator
     ) -> None:
@@ -200,7 +200,7 @@ class _LoginSession:  # pragma: no cover - shim
         try:
             self._server.shutdown()
             self._server.server_close()
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             pass
         if self._thread.is_alive():
             self._thread.join(timeout=1)
@@ -247,7 +247,7 @@ class AuthManager:
             return None
         try:
             data = json.loads(self._storage_path.read_text(encoding="utf-8"))
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             _LOGGER.warning("failed to read auth cache: %s", exc)
             return None
         return ChatGPTCredentials.from_dict(data)
@@ -262,7 +262,7 @@ class AuthManager:
     def _clear_credentials(self) -> None:
         try:
             self._storage_path.unlink()
-        except FileNotFoundError:  # pragma: no cover - defensive
+        except FileNotFoundError:
             pass
         self._credentials = None
 
@@ -308,6 +308,10 @@ class AuthManager:
             return bool(self._api_key and self._api_key.strip())
 
     def get_credentials(self) -> ChatGPTCredentials | None:
+        with self._lock:
+            return self._credentials
+
+    def _cached_credentials(self) -> ChatGPTCredentials | None:
         with self._lock:
             return self._credentials
 
@@ -372,19 +376,15 @@ class AuthManager:
             expires_at=expires_at,
         )
 
-    async def login(
-        self, *, force: bool = False, timeout: float = 120.0
-    ) -> ChatGPTCredentials:  # pragma: no cover - interactive
-        if not force:
-            with self._lock:
-                existing = self._credentials
-            if existing:
-                return existing
+    async def login(self, *, force: bool = False, timeout: float = 120.0) -> ChatGPTCredentials:
+        cached = None if force else self._cached_credentials()
+        if cached:
+            return cached
         loop = asyncio.get_running_loop()
         coordinator = _LoginCoordinator(loop, secrets.token_urlsafe(24))
         try:
             session = _LoginSession.start("127.0.0.1", self._login_port, coordinator)
-        except OSError as exc:  # pragma: no cover - port binding edge
+        except OSError as exc:
             raise AuthError(f"failed to bind login port {self._login_port}: {exc}") from exc
         with self._lock:
             self._active_login = session
@@ -405,7 +405,7 @@ class AuthManager:
             auth_url = f"{OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
             try:
                 self._browser_opener(auth_url)
-            except Exception:  # pragma: no cover - best effort
+            except Exception:
                 _LOGGER.debug("browser open failed")
             # Display the URL in case auto-open fails
             print(f"Please open this URL to sign in: {auth_url}")
@@ -421,9 +421,7 @@ class AuthManager:
             self._auth_mode = AuthMode.CHATGPT
         return credentials
 
-    async def _exchange_code(
-        self, code: str, code_verifier: str, redirect_uri: str
-    ) -> ChatGPTCredentials:  # pragma: no cover - interactive
+    async def _exchange_code(self, code: str, code_verifier: str, redirect_uri: str) -> ChatGPTCredentials:
         payload = {
             "grant_type": "authorization_code",
             "client_id": self._client_id,
@@ -440,7 +438,7 @@ class AuthManager:
             raise AuthError("failed to redeem authorization code") from exc
         return self._build_credentials(response.json())
 
-    def cancel_login(self) -> None:  # pragma: no cover - interactive shim
+    def cancel_login(self) -> None:
         with self._lock:
             session = self._active_login
         if session:
@@ -475,7 +473,7 @@ def _decode_id_token(token: str) -> dict[str, Any]:
         padded = payload + "=" * (-len(payload) % 4)
         chunk = base64.urlsafe_b64decode(padded)
         return json.loads(chunk)
-    except Exception:  # pragma: no cover - best effort
+    except Exception:
         return {}
 
 
