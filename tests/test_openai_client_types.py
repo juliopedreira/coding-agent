@@ -36,6 +36,9 @@ def test_message_validation() -> None:
     assert msg.role == MessageRole.TOOL
     assert msg.tool_call_id == "tc_123"
 
+    with pytest.raises(ValueError):
+        Message(role=MessageRole.TOOL, content="ok", tool_call_id="")
+
 
 def test_tool_definition_validation() -> None:
     with pytest.raises(ValueError):
@@ -86,6 +89,8 @@ def test_conversation_request_validation() -> None:
 def test_delta_and_tool_call_payload_validation() -> None:
     with pytest.raises(ValueError):
         ToolCallPayload(id=" ", name="run", arguments="{}")
+    with pytest.raises(ValueError):
+        ToolCallPayload(id="tc1", name=" ", arguments="{}")
 
     payload = ToolCallPayload(id="tc1", name="run", arguments='{"a": 1}')
 
@@ -112,6 +117,8 @@ def test_text_and_tool_call_events_validation() -> None:
 
     with pytest.raises(ValueError):
         ToolCallDelta(tool_call_id=" ", arguments_delta="")
+    with pytest.raises(ValueError):
+        ToolCallDelta(tool_call_id="tc", arguments_delta="")
 
     payload = ToolCallPayload(id="tc1", name="run", arguments="{}")
     start = ToolCallStart(tool_call=payload)

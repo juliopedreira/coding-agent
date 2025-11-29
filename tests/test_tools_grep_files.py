@@ -1,8 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
-from lincona.tools.grep_files import grep_files
+from lincona.tools.grep_files import GrepFilesInput, grep_files
+import lincona.tools.grep_files as grep_mod
 
 
 def test_grep_matches_and_limit(tmp_path: Path) -> None:
@@ -83,3 +85,54 @@ def test_grep_truncates_long_lines(tmp_path: Path) -> None:
     match = results[0].matches[0]
     assert match.line.startswith("x" * 1000)
     assert match.truncated is True
+
+
+def test_grep_input_parses_include_string_json() -> None:
+    validated = GrepFilesInput.model_validate({"pattern": "x", "include": '["*.py","*.md"]'})
+    assert validated.include == ["*.py", "*.md"]
+
+
+def test_grep_input_parses_include_csv_and_empty() -> None:
+    validated = GrepFilesInput.model_validate({"pattern": "x", "include": "a.py, b.py"})
+    assert validated.include == ["a.py", "b.py"]
+    validated_empty = GrepFilesInput.model_validate({"pattern": "x", "include": " [] "})
+    assert validated_empty.include is None
+
+
+def test_grep_files_with_stubbed_iter(monkeypatch):
+    class StubBoundary:
+        def sanitize_path(self, path):
+            return Path("/root")
+
+        def assert_within_root(self, path):
+            return None
+
+        def root_path(self):
+            return None
+
+    class FakePath:
+        def __init__(self, text: str):
+            self._text = text
+
+        def read_text(self, *a, **k):
+            return self._text
+
+        def resolve(self):
+            return Path("/abs/file.txt")
+
+        def is_file(self):
+            return True
+
+        def match(self, pattern):
+            return True
+
+    monkeypatch.setattr("lincona.tools.grep_files._iter_files", lambda root, include=None: [FakePath("hit\n")])
+    results = grep_files(StubBoundary(), "hit")
+    assert results[0].file == "/abs/file.txt"
+
+
+def test_iter_files_skips_dirs(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "subdir").mkdir(parents=True, exist_ok=True)
+    files = list(grep_mod._iter_files(root))
+    assert files == []

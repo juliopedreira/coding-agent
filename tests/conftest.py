@@ -22,7 +22,31 @@ def _isolate_lincona_home(monkeypatch):
 
     home = PROJECT_ROOT / ".work"
     if home.exists():
-        shutil.rmtree(home)
+        shutil.rmtree(home, ignore_errors=True)
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("LINCONA_HOME", str(home))
     yield
+
+
+@pytest.fixture
+def dummy_tool_classes():
+    """Provide simple Tool/Registration-friendly classes for reuse."""
+
+    from lincona.tools.base import ToolRequest, ToolResponse, Tool
+
+    class EchoRequest(ToolRequest):
+        msg: str
+
+    class EchoResponse(ToolResponse):
+        msg: str
+
+    class EchoTool(Tool[EchoRequest, EchoResponse]):
+        name = "echo"
+        description = "echo upper"
+        InputModel = EchoRequest
+        OutputModel = EchoResponse
+
+        def execute(self, request: EchoRequest) -> EchoResponse:  # type: ignore[override]
+            return EchoResponse(msg=request.msg.upper())
+
+    return EchoRequest, EchoResponse, EchoTool

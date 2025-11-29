@@ -16,3 +16,11 @@ def test_on_request_allows() -> None:
 def test_always_blocks() -> None:
     with pytest.raises(ApprovalRequiredError):
         approval_guard(ApprovalPolicy.ALWAYS, "apply_patch")
+
+
+def test_unknown_policy_raises() -> None:
+    class FakePolicy(str):
+        pass
+
+    with pytest.raises(ValueError):
+        approval_guard(FakePolicy("weird"), "x")  # type: ignore[arg-type]

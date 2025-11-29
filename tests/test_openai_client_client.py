@@ -2,6 +2,9 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
+import lincona.config
+import lincona.openai_client.client as client_module
+
 import httpx
 import pytest
 
@@ -11,6 +14,7 @@ from lincona.openai_client.transport import MockResponsesTransport
 from lincona.openai_client.types import (
     ApiAuthError,
     ApiClientError,
+    ApiError,
     ApiRateLimitError,
     ApiServerError,
     ApiTimeoutError,
@@ -19,6 +23,7 @@ from lincona.openai_client.types import (
     ErrorEvent,
     Message,
     MessageRole,
+    StreamingParseError,
     ToolDefinition,
 )
 
@@ -149,6 +154,76 @@ async def test_timeout_and_request_error_mapping() -> None:
     client = OpenAIResponsesClient(RequestErrorTransport())
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiClientError)
+
+
+@pytest.mark.asyncio
+async def test_streaming_parse_error_yields_error_event() -> None:
+    class BadTransport:
+        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+            yield "data: {not-json"
+
+    client = OpenAIResponsesClient(BadTransport())
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0], ErrorEvent)
+    assert isinstance(events[0].error, StreamingParseError)
+
+
+@pytest.mark.asyncio
+async def test_api_error_passthrough() -> None:
+    class ApiErrorTransport:
+        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+            raise ApiRateLimitError("slow")
+
+    client = OpenAIResponsesClient(ApiErrorTransport())
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0].error, ApiRateLimitError)
+
+
+@pytest.mark.asyncio
+async def test_generic_exception_wrapped() -> None:
+    class BoomTransport:
+        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+            raise ValueError("boom")
+
+    client = OpenAIResponsesClient(BoomTransport())
+    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    events = [event async for event in client.submit(request)]
+    assert isinstance(events[0].error, ApiError)
+    assert str(events[0].error) == "unexpected error"
+
+
+def test_build_payload_requires_model() -> None:
+    client = OpenAIResponsesClient(MockResponsesTransport([]))
+    with pytest.raises(ApiClientError):
+        client._build_payload(ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model=None))
+
+
+def test_tool_to_dict_unsupported_type() -> None:
+    class Unknown:
+        pass
+
+    with pytest.raises(TypeError):
+        client_module._tool_to_dict(Unknown())  # type: ignore[arg-type]
+
+
+def test_payload_includes_verbosity() -> None:
+    transport = MockResponsesTransport([])
+    client = OpenAIResponsesClient(transport)
+    request = ConversationRequest(
+        messages=[Message(role=MessageRole.USER, content="hi")],
+        model="gpt-4.1",
+        verbosity=lincona.config.Verbosity.HIGH,
+    )
+    payload = client._build_payload(request)
+    assert payload["reasoning"]["verbosity"] == "high"
+
+
+def test_message_to_content_includes_tool_call_id() -> None:
+    msg = Message(role=MessageRole.ASSISTANT, content="ok", tool_call_id="tc1")
+    content = client_module._message_to_content(msg)
+    assert content["tool_call_id"] == "tc1"
 
 
 def test_status_error_mapping_function() -> None:

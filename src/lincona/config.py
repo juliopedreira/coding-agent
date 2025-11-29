@@ -188,7 +188,7 @@ def load_settings(
         created_new = True
 
     config_data: dict[str, Any] = {}
-    if path.exists():  # pragma: no cover - simple IO branch
+    if path.exists():
         _ensure_permissions(path)
         config_data = _read_toml(path)
 
@@ -259,14 +259,14 @@ def load_settings(
     applied_reasoning = reasoning_effort or selected_cap.default_reasoning
     if applied_reasoning is None and selected_cap.reasoning_effort:
         applied_reasoning = selected_cap.reasoning_effort[0]
-    if applied_reasoning and applied_reasoning not in selected_cap.reasoning_effort:  # pragma: no cover - defensive
+    if applied_reasoning and applied_reasoning not in selected_cap.reasoning_effort:
         raise SystemExit(f"reasoning '{applied_reasoning.value}' not supported for model {model}")
 
     applied_verbosity = verbosity or selected_cap.default_verbosity
     if applied_verbosity is None and selected_cap.verbosity:
         applied_verbosity = selected_cap.verbosity[0]
     if applied_verbosity:
-        if applied_verbosity not in selected_cap.verbosity:  # pragma: no cover - defensive
+        if applied_verbosity not in selected_cap.verbosity:
             raise SystemExit(f"verbosity '{applied_verbosity.value}' not supported for model {model}")
 
     settings = Settings(
@@ -285,7 +285,7 @@ def load_settings(
     return settings
 
 
-def write_config(settings: Settings, config_path: Path | str | None = None) -> Path:  # pragma: no cover - IO helper
+def write_config(settings: Settings, config_path: Path | str | None = None) -> Path:
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -383,7 +383,7 @@ def _first_value(*candidates: Any) -> Any:
 
 def _coerce_reasoning(
     value: Any, default: ReasoningEffort | None = None
-) -> ReasoningEffort | None:  # pragma: no cover - defensive helper
+) -> ReasoningEffort | None:
     if value is None:
         return default
     if isinstance(value, ReasoningEffort):
@@ -398,7 +398,7 @@ def _coerce_reasoning(
 
 def _coerce_verbosity(
     value: Any, default: Verbosity | None = None
-) -> Verbosity | None:  # pragma: no cover - defensive helper
+) -> Verbosity | None:
     if value is None:
         return default
     if isinstance(value, Verbosity):
@@ -411,7 +411,7 @@ def _coerce_verbosity(
     return default
 
 
-def _coerce_enum(value: Any, enum_cls: type[Enum], default: Enum | None = None) -> Enum | None:  # pragma: no cover
+def _coerce_enum(value: Any, enum_cls: type[Enum], default: Enum | None = None) -> Enum | None:
     if value is None:
         return default
     if isinstance(value, enum_cls):
@@ -424,7 +424,7 @@ def _coerce_enum(value: Any, enum_cls: type[Enum], default: Enum | None = None) 
     return default
 
 
-def _parse_models(section: Any) -> dict[str, ModelCapabilities]:  # pragma: no cover - I/O parse helper
+def _parse_models(section: Any) -> dict[str, ModelCapabilities]:
     if not isinstance(section, dict):
         return {}
     models: dict[str, ModelCapabilities] = {}
@@ -443,7 +443,6 @@ def _parse_models(section: Any) -> dict[str, ModelCapabilities]:  # pragma: no c
     return models
 
 
-# pragma: no cover - formatting helper
 def _append_section(parts: list[str], name: str, values: Mapping[str, Any]) -> None:
     filtered = {k: v for k, v in values.items() if v is not None and v != [] and v != ()}
     if not filtered:

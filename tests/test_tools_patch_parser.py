@@ -71,3 +71,64 @@ def test_parse_update_file_header() -> None:
 """
     patches = parse_unified_diff(diff)
     assert patches[0].path.as_posix() == "dir/file.txt"
+
+
+def test_delete_file_header_sets_delete_flag():
+    diff = """*** Delete File: path/to/file.txt"""
+    patches = parse_unified_diff(diff)
+    assert patches[0].delete is True
+    assert patches[0].path.as_posix() == "path/to/file.txt"
+
+
+def test_rename_treated_as_modify_path() -> None:
+    diff = """--- a/old.txt
++++ b/new.txt
+@@ -1,1 +1,1 @@
+-a
++a
+"""
+    patches = parse_unified_diff(diff)
+    assert patches[0].path.as_posix() == "new.txt"
+
+
+def test_parse_missing_plus_header_raises() -> None:
+    diff = """--- a/file.txt
+@@ -0,0 +1,1 @@
++hi
+"""
+    with pytest.raises(PatchParseError):
+        parse_unified_diff(diff)
+
+
+def test_parse_no_hunks_raises() -> None:
+    diff = """*** Update File: file.txt
+"""
+    with pytest.raises(PatchParseError):
+        parse_unified_diff(diff)
+
+
+def test_parse_no_patches_found() -> None:
+    with pytest.raises(PatchParseError):
+        parse_unified_diff("just text")
+
+
+def test_parse_multiple_hunks_breaks_correctly() -> None:
+    diff = """--- a/file.txt
++++ b/file.txt
+@@ -1,1 +1,2 @@
+-old
++new
+@@ -3,1 +3,1 @@
+-tail
++tail
+"""
+    patches = parse_unified_diff(diff)
+    assert len(patches[0].hunks) == 2
+
+
+def test_unified_diff_no_hunks_raises() -> None:
+    diff = """--- a/file.txt
++++ b/file.txt
+"""
+    with pytest.raises(PatchParseError):
+        parse_unified_diff(diff)

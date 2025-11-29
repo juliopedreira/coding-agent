@@ -1,4 +1,3 @@
-# pragma: no cover
 """OpenAI Responses client orchestrator."""
 
 from __future__ import annotations
@@ -79,7 +78,7 @@ class OpenAIResponsesClient:
             yield ErrorEvent(error=exc)
         except ApiError as exc:
             yield ErrorEvent(error=exc)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             err = ApiError("unexpected error")
             err.__cause__ = exc
             yield ErrorEvent(error=err)

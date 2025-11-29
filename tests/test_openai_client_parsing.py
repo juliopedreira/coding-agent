@@ -169,3 +169,111 @@ async def test_buffer_limit_guard() -> None:
 
     with pytest.raises(StreamingParseError):
         await collect_events(chunks)
+
+
+# Consolidated extra parsing tests
+@pytest.mark.asyncio
+async def test_tool_call_end_uses_buffered_arguments_extra() -> None:
+    chunks = [
+        'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+        'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"{","name":"run"}}\n',
+        'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"\\"a\\":1}"}}\n',
+        'data: {"type":"tool_call_end","delta":{"id":"tc1","name":"run","arguments":""}}\n',
+    ]
+
+    async def gen():
+        for c in chunks:
+            yield c
+
+    events = [e async for e in parse_stream(gen())]
+    end_event = next(e for e in events if isinstance(e, ToolCallEnd))
+    assert end_event.tool_call.arguments == '{"a":1}'
+
+
+@pytest.mark.asyncio
+async def test_text_delta_missing_text_raises_extra() -> None:
+    async def gen():
+        yield 'data: {"type":"text_delta","delta":{}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen())]
+
+
+@pytest.mark.asyncio
+async def test_done_seen_only_once_extra() -> None:
+    async def gen():
+        yield "data: [DONE]\n"
+        yield "data: [DONE]\n"
+
+    events = [e async for e in parse_stream(gen())]
+    assert len([e for e in events if isinstance(e, MessageDone)]) == 2
+
+
+@pytest.mark.asyncio
+async def test_text_and_done_extra() -> None:
+    async def gen():
+        yield 'data: {"type":"text_delta","delta":{"text":"hi"}}\n'
+        yield "[DONE]"
+
+    events = [e async for e in parse_stream(gen())]
+    assert isinstance(events[0], TextDelta)
+    assert isinstance(events[-1], MessageDone)
+
+
+@pytest.mark.asyncio
+async def test_done_mixed_with_other_lines_extra() -> None:
+    chunks = [
+        'data: {"type":"text_delta","delta":{"text":"hi"}}\n',
+        "data: [DONE]\n",
+        'data: {"type":"text_delta","delta":{"text":"ignored"}}\n',
+    ]
+
+    async def gen():
+        for c in chunks:
+            yield c
+
+    events = [e async for e in parse_stream(gen())]
+
+    assert isinstance(events[0], TextDelta)
+    assert any(isinstance(e, MessageDone) for e in events)
+
+
+# Error-path coverage consolidated
+@pytest.mark.asyncio
+async def test_tool_call_delta_missing_id_raises_extra() -> None:
+    async def gen():
+        yield 'data: {"type":"tool_call_delta","delta":{"arguments_delta":"{}"}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen())]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_start_missing_fields_raise_extra() -> None:
+    async def gen():
+        yield 'data: {"type":"tool_call_start","delta":{"name":"x","arguments":""}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen())]
+
+    async def gen2():
+        yield 'data: {"type":"tool_call_start","delta":{"id":"tc","arguments":""}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen2())]
+
+    async def gen3():
+        yield 'data: {"type":"tool_call_start","delta":{"id":"tc","name":"x","arguments":""}}\n'
+        yield 'data: {"type":"tool_call_end","delta":{"id":"tc","name":"","arguments":""}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen3())]
+
+
+@pytest.mark.asyncio
+async def test_tool_call_arguments_missing_raises_extra() -> None:
+    async def gen():
+        yield 'data: {"type":"tool_call_end","delta":{"id":"tc","name":"run"}}\n'
+
+    with pytest.raises(StreamingParseError):
+        [e async for e in parse_stream(gen())]

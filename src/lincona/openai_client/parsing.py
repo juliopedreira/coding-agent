@@ -155,7 +155,7 @@ async def parse_stream(
 
             try:
                 payload = json.loads(content)
-            except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            except json.JSONDecodeError as exc:
                 raise StreamingParseError(f"invalid JSON chunk: {content}") from exc
 
             for event in state.handle_json(payload):

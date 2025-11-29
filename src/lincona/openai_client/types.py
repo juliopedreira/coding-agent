@@ -1,4 +1,3 @@
-# pragma: no cover
 """Domain models for the OpenAI Responses client."""
 
 from __future__ import annotations

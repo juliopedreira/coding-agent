@@ -1,12 +1,24 @@
 import asyncio
 import io
+from pathlib import Path
 
 import pytest
 
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ModelCapabilities, ReasoningEffort, Settings, Verbosity
-from lincona.openai_client.types import ToolCallPayload
-from lincona.repl import AgentRunner, _ToolCallBuffer
+from lincona.openai_client.types import (
+    ErrorEvent,
+    MessageDone,
+    Message,
+    MessageRole,
+    TextDelta,
+    ToolCallDelta,
+    ToolCallEnd,
+    ToolCallPayload,
+    ToolCallStart,
+)
+from lincona.repl import AgentRunner, _ToolCallBuffer, _json_default
 from lincona.tools.apply_patch import PatchResult
+from lincona.tools.fs import FsBoundary
 from lincona.tools.router import ToolRouter
 
 
@@ -218,3 +230,107 @@ def test_model_set_rejects_unsupported_verbosity(settings, monkeypatch, tmp_path
 
     asyncio.run(runner._handle_slash("/model:set gpt-5.1-codex-mini:none:low"))
     assert "verbosity 'low' not supported" in out.getvalue()
+
+
+class DummyClient:
+    def __init__(self, events):
+        self._events = events
+        self._used = False
+
+    async def submit(self, request):
+        if self._used:
+            yield MessageDone(finish_reason=None)
+            return
+        self._used = True
+        for event in self._events:
+            yield event
+
+
+def _stub_runner(settings, events, monkeypatch):
+    runner = AgentRunner(settings, transport=SequenceTransport([['data: {"type":"response.done"}']]), boundary_root=Path("."))
+    runner.client = DummyClient(events)
+    # silence file logging/append
+    runner.writer.append = lambda *a, **k: None  # type: ignore[attr-defined]
+    return runner
+
+
+def test_handle_stream_event_variants(settings, monkeypatch, capsys):
+    events = [
+        TextDelta(text="chunk"),
+        ToolCallStart(tool_call=ToolCallPayload(id="c1", name="t", arguments="")),
+        ToolCallDelta(tool_call_id="c1", arguments_delta="{}", name="t"),
+        ToolCallEnd(tool_call=ToolCallPayload(id="c1", name="t", arguments="{}")),
+        MessageDone(finish_reason=None),
+    ]
+    runner = _stub_runner(settings, events, monkeypatch)
+    runner.router = ToolRouter(FsBoundary(FsMode.UNRESTRICTED), ApprovalPolicy.NEVER)  # real router needed
+    # ensure tool call execution returns non-empty output to exercise logging branch
+    runner._execute_tools = lambda calls: [
+        (Message(role=MessageRole.TOOL, content="tool-output", tool_call_id=calls[0].tool_call.id), calls[0])
+    ]
+    text = asyncio.run(runner.run_turn("go"))
+    assert text.startswith("chunk")
+    assert "tool-output" in text
+    captured = capsys.readouterr().out
+    assert "chunk" in captured
+
+
+def test_handle_stream_error_branch(settings, monkeypatch, capsys):
+    err = ErrorEvent(error=RuntimeError("boom"))
+    runner = _stub_runner(settings, [err], monkeypatch)
+    asyncio.run(runner.run_turn("err"))
+    assert "boom" in capsys.readouterr().out
+
+
+def test_execute_tools_dispatch_failure(settings, monkeypatch):
+    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], monkeypatch)
+
+    class FailingRouter:
+        def dispatch(self, name: str, **kwargs):
+            raise RuntimeError("bad")
+
+    runner.router = FailingRouter()  # type: ignore[assignment]
+    buf = _ToolCallBuffer(tool_call=ToolCallPayload(id="x", name="noop", arguments="{}"), arguments="{}")
+    messages = runner._execute_tools([buf])
+    assert "bad" in messages[0][0].content
+
+
+def test_slash_usage_and_invalid_reasoning(settings, monkeypatch, capsys):
+    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], monkeypatch)
+    asyncio.run(runner._handle_slash("/model:set"))
+    asyncio.run(runner._handle_slash("/reasoning nope"))
+    captured = capsys.readouterr().out
+    assert "usage: /model:set" in captured
+    assert "reasoning must be one of" in captured
+
+
+def test_print_model_list_text_path(settings, monkeypatch, capsys):
+    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], monkeypatch)
+    runner._print_model_list()
+    assert "Available models" in capsys.readouterr().out
+
+
+def test_set_model_missing_defaults(monkeypatch, capsys, settings):
+    caps = ModelCapabilities(reasoning_effort=(), default_reasoning=None, verbosity=(), default_verbosity=None)
+    settings = Settings(**{**settings.model_dump(), "models": {"empty": caps}, "model": "empty"})
+    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], monkeypatch)
+    runner._set_model("empty")
+    assert "no default reasoning" in capsys.readouterr().out
+
+
+def test_require_api_key_raises(monkeypatch, settings):
+    no_key = Settings(**{**settings.model_dump(), "api_key": None})
+    runner = AgentRunner(no_key, transport=SequenceTransport([['data: {"type":"response.done"}']]))
+    with pytest.raises(SystemExit):
+        runner._require_api_key()
+
+
+def test_json_default_handles_bytes_and_path(tmp_path):
+    class Demo:
+        def __init__(self, p):
+            self.path = p
+
+    assert _json_default(b"abc") == "abc"
+    assert str(tmp_path / "x") == _json_default(tmp_path / "x")
+    # dataclass coverage is already handled elsewhere; ensure str fallback
+    assert "Demo" in _json_default(Demo(tmp_path / "y"))

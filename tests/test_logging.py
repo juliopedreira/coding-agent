@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from lincona.config import LogLevel
-from lincona.logging import configure_session_logger, session_log_path
+from lincona.logging import configure_session_logger, session_log_path, _to_logging_level
 
 
 def test_session_log_path_respects_base(tmp_path: Path) -> None:
@@ -50,3 +50,9 @@ def test_string_log_level_maps(tmp_path: Path) -> None:
     logger = configure_session_logger(session_id, base_dir=tmp_path, log_level="info")
 
     assert logger.level == logging.INFO
+
+
+def test_to_logging_level_handles_enum_and_string():
+    assert _to_logging_level(LogLevel.ERROR) == logging.ERROR
+    assert _to_logging_level("debug") == logging.DEBUG
+    assert _to_logging_level(123) == logging.WARNING

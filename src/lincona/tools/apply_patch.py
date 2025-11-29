@@ -124,7 +124,9 @@ def apply_patch(boundary: FsBoundary, patch_text: str, *, freeform: bool = False
 
 
 def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
-    def _convert_results(results: list[PatchResult]) -> ApplyPatchOutput:
+    def _convert_results(results: ApplyPatchOutput | list[PatchResult]) -> ApplyPatchOutput:
+        if isinstance(results, ApplyPatchOutput):
+            return results
         return ApplyPatchOutput(
             results=[
                 PatchResultModel(path=str(res.path), bytes_written=res.bytes_written, created=res.created)
@@ -143,7 +145,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=ApplyPatchOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=False).execute),
             requires_approval=True,
-            result_adapter=lambda out: [r.model_dump() for r in cast(ApplyPatchOutput, out).results],
+            result_adapter=lambda out: [r.model_dump() for r in _convert_results(out).results],
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
         ),
         ToolRegistration(
@@ -153,7 +155,7 @@ def tool_registrations(boundary: FsBoundary) -> list[ToolRegistration]:
             output_model=ApplyPatchOutput,
             handler=cast(Callable[[ToolRequest], ToolResponse], ApplyPatchTool(boundary, freeform=True).execute),
             requires_approval=True,
-            result_adapter=lambda out: [r.model_dump() for r in cast(ApplyPatchOutput, out).results],
+            result_adapter=lambda out: [r.model_dump() for r in _convert_results(out).results],
             end_event_builder=lambda v, o: _end_event(cast(ApplyPatchInput, v), cast(ApplyPatchOutput, o)),
         ),
     ]

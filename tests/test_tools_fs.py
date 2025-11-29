@@ -70,3 +70,20 @@ def test_root_path_accessor() -> None:
     unrestricted = FsBoundary(FsMode.UNRESTRICTED)
     assert restricted.root_path() == Path("/tmp/root")
     assert unrestricted.root_path() is None
+
+
+def test_assert_within_root_raises_for_outside_path() -> None:
+    boundary = FsBoundary(FsMode.RESTRICTED, root=Path("/tmp/root"))
+    with pytest.raises(FsViolationError):
+        boundary.assert_within_root(Path("/tmp/other/file.txt"))
+
+
+def test_is_within_true_for_inside_path() -> None:
+    root = Path("/tmp/root")
+    boundary = FsBoundary(FsMode.RESTRICTED, root=root)
+    assert boundary._is_within(root / "child.txt") is True
+
+
+def test_is_within_unrestricted_always_true() -> None:
+    boundary = FsBoundary(FsMode.UNRESTRICTED)
+    assert boundary._is_within(Path("/anywhere")) is True

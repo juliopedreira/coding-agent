@@ -1,4 +1,3 @@
-# pragma: no cover
 """Console entrypoint for Lincona.
 
 Provides a minimal REPL-style agent with tool support plus standalone tool
@@ -15,6 +14,7 @@ import sys
 from typing import Any
 
 from openai import OpenAI
+
 from lincona import __version__
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, Verbosity, load_settings
 from lincona.logging import _to_logging_level
@@ -148,7 +148,7 @@ def _run_tool(settings: Settings, args: argparse.Namespace) -> int:
 
     try:
         result = router.dispatch(args.name, **payload)
-    except Exception as exc:  # pragma: no cover - CLI surface
+    except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -207,7 +207,7 @@ def _run_show_models_capabilities(settings: Settings) -> int:
     client = OpenAI(api_key=settings.api_key)
     try:
         models = client.models.list()
-    except Exception as exc:  # pragma: no cover - network error surface
+    except Exception as exc:
         print(f"failed to fetch models: {exc}", file=sys.stderr)
         return 1
 

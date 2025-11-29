@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -148,3 +149,122 @@ def test_run_config_unknown_command():
     settings = Settings(api_key="test")
     args = argparse.Namespace(config_cmd="unknown")
     assert cli._run_config(settings, args) == 1
+
+
+def test_main_unknown_command(monkeypatch):
+    with pytest.raises(SystemExit):
+        cli.main(["unknown"])
+
+
+def test_run_tool_dispatch_error(monkeypatch):
+    settings = Settings(api_key="test")
+    args = argparse.Namespace(name="list_dir", json_payload=None, arg=[], command="tool")
+    monkeypatch.setattr(cli.ToolRouter, "dispatch", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fail")))
+    rc = cli._run_tool(settings, args)
+    assert rc == 1
+
+
+def test_sessions_unknown_command(monkeypatch):
+    args = argparse.Namespace(sessions_cmd="noop", session_id="x")
+    assert cli._run_sessions(args) == 1
+
+
+def test_show_models_requires_api_key(monkeypatch, capsys):
+    settings = Settings(api_key=None)
+    rc = cli._run_show_models_capabilities(settings)
+    assert rc == 1
+    assert "OPENAI_API_KEY not set" in capsys.readouterr().err
+
+
+def test_show_models_handles_exception(monkeypatch, capsys):
+    class BadClient:
+        class models:
+            @staticmethod
+            def list():
+                raise RuntimeError("oops")
+
+    monkeypatch.setattr(cli, "OpenAI", lambda api_key=None: BadClient)
+    settings = Settings(api_key="k")
+    rc = cli._run_show_models_capabilities(settings)
+    assert rc == 1
+    assert "failed to fetch models" in capsys.readouterr().err
+
+
+def test_show_models_handles_no_rows(monkeypatch, capsys):
+    class ModelObj:
+        def __init__(self, id):
+            self.id = id
+
+    class FakeModels:
+        def list(self):
+            class Obj:
+                data = [ModelObj("not-gpt")]
+
+            return Obj()
+
+    monkeypatch.setattr(cli, "OpenAI", lambda api_key=None: type("C", (), {"models": FakeModels()})())
+    settings = Settings(api_key="k")
+    rc = cli._run_show_models_capabilities(settings)
+    assert rc == 0
+    assert "no GPT-5 models" in capsys.readouterr().out
+
+
+def test_cli_main_entrypoint(monkeypatch):
+    import runpy
+    import sys
+
+    # ensure a clean import to avoid RuntimeWarning about existing module
+    sys.modules.pop("lincona.cli", None)
+    monkeypatch.setattr("sys.argv", ["lincona", "--version"])
+    with pytest.raises(SystemExit):
+        runpy.run_module("lincona.cli", run_name="__main__")
+
+
+def test_main_handles_unknown_command_branch(monkeypatch):
+    parser = cli.build_parser()
+
+    def fake_parse_args(self, argv=None):
+        return argparse.Namespace(
+            command="weird",
+            debug=None,
+            model=None,
+            reasoning=None,
+            verbosity=None,
+            fs_mode=None,
+            approval_policy=None,
+            log_level=None,
+            show_models_capabilities=False,
+            config_path=None,
+            json_payload=None,
+            arg=[],
+            sessions_cmd=None,
+            config_cmd=None,
+            name=None,
+        )
+
+    monkeypatch.setattr(cli.argparse.ArgumentParser, "parse_args", fake_parse_args, raising=False)
+    # avoid real repl execution
+    monkeypatch.setattr(cli, "_run_chat", lambda settings: None)
+    with pytest.raises(SystemExit):
+        cli.main(["weird"])
+
+
+def test_debug_flag_writes_log(tmp_path: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    async def fake_repl(self):
+        return None
+
+    monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
+
+    rc = cli.main(["--debug", str(tmp_path / "ignored.log"), "chat"])
+
+    assert rc == 0
+    sessions_root = tmp_path / "sessions"
+    session_dirs = [p for p in sessions_root.iterdir() if p.is_dir()]
+    assert len(session_dirs) == 1
+    log_file = session_dirs[0] / "log.txt"
+    assert log_file.exists()
+    content = log_file.read_text()
+    assert "session started" in content

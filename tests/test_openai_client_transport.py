@@ -169,3 +169,197 @@ async def test_sdk_transport_streams_events() -> None:
     async for chunk in transport.stream_response({"hello": "world"}):
         chunks.append(chunk)
     assert json.loads(chunks[0]) == {"type": "text_delta", "delta": {"text": "hi"}}
+
+
+def test_http_transport_custom_headers_and_logger(monkeypatch):
+    recorded = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded["headers"] = dict(request.headers)
+        recorded["url"] = str(request.url)
+        body = 'data: {"type":"response.done"}\n'
+        return httpx.Response(200, text=body, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    events: list[tuple[str, dict[str, object]]] = []
+    transport = HttpResponsesTransport(
+        api_key="k",
+        user_agent="ua",
+        beta_header=None,
+        client=client,
+        logger=lambda e, d: events.append((e, d)),
+    )
+
+    async def run():
+        async for _ in transport.stream_response({"x": 1}):
+            pass
+        await transport.aclose()
+        await client.aclose()
+
+    import asyncio
+
+    asyncio.run(run())
+    assert recorded["headers"]["user-agent"] == "ua"
+    assert "openai-beta" not in recorded["headers"]
+    assert events and events[0][0] == "response_complete"
+
+
+@pytest.mark.asyncio
+async def test_mock_transport_logger_called_on_success():
+    events = []
+    transport = MockResponsesTransport(["x"], logger=lambda e, d: events.append((e, d)))
+    chunks = []
+    async for c in transport.stream_response({}):
+        chunks.append(c)
+    assert events and events[0][0] == "response_complete"
+
+
+@pytest.mark.asyncio
+async def test_http_transport_aclose_owned_client():
+    transport = HttpResponsesTransport(api_key="k")
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sdk_transport_raises_http_status_with_body():
+    request = httpx.Request("POST", "https://api.test")
+    response = httpx.Response(400, text="bad", request=request)
+
+    class FailingClient:
+        class responses:  # type: ignore[invalid-name]
+            @staticmethod
+            async def create(**kwargs):
+                raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+    transport = OpenAISDKResponsesTransport(api_key="x", client=FailingClient())
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        async for _ in transport.stream_response({"hello": "world"}):
+            pass
+    assert "body=bad" in str(excinfo.value)
+
+
+def test_map_openai_event_unknown_returns_none():
+    assert _map_openai_event(type("E", (), {"type": "unknown"})) is None
+
+
+@pytest.mark.asyncio
+async def test_http_transport_async_context_manager():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="data: [DONE]\n", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    async with HttpResponsesTransport(api_key="k", client=client) as transport:
+        async for _ in transport.stream_response({"x": 1}):
+            pass
+    await client.aclose()
+
+
+def test_map_openai_event_handles_non_string_delta():
+    assert _map_openai_event(type("E", (), {"type": "response.output_text.delta", "delta": 123})) is None
+
+
+def test_map_openai_event_missing_arguments_delta_returns_none():
+    evt = type("E", (), {"type": "response.function_call_arguments.delta", "item_id": None, "delta": {}, "name": "n"})
+    assert _map_openai_event(evt) is None
+
+
+def test_map_openai_event_done_missing_call_id_returns_none():
+    evt = type("E", (), {"type": "response.function_call_arguments.done", "item_id": None, "arguments": "{}", "name": "n"})
+    assert _map_openai_event(evt) is None
+
+
+# Consolidated extra transport tests
+@pytest.mark.asyncio
+async def test_retry_after_mapping_and_logging() -> None:
+    calls = []
+    events = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(429, text="rate", headers={"Retry-After": "5"}, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpResponsesTransport(api_key="abc", client=client, logger=lambda name, data: events.append(data))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        async for _ in transport.stream_response({"hello": "world"}):
+            pass
+
+    await transport.aclose()
+    await client.aclose()
+
+    assert calls
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_aiter_lines_empty_lines_skipped() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="\n\n", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpResponsesTransport(api_key="abc", client=client)
+
+    chunks = []
+    async for c in transport.stream_response({"hello": "world"}):
+        chunks.append(c)
+
+    await transport.aclose()
+    await client.aclose()
+
+    assert chunks == []
+
+
+def test_transport_requires_api_key() -> None:
+    with pytest.raises(ValueError):
+        HttpResponsesTransport(api_key=" ")
+
+
+def test_transport_logs_on_completion(monkeypatch):
+    events = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = 'data: {"delta":"hi"}\n\ndata: [DONE]\n'
+        return httpx.Response(200, text=body, headers={"x-request-id": "req-1"}, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpResponsesTransport(api_key="abc", client=client, logger=lambda name, data: events.append(data))
+
+    async def run():
+        async for _ in transport.stream_response({"hello": "world"}):
+            pass
+        await transport.aclose()
+        await client.aclose()
+
+    import asyncio
+
+    asyncio.run(run())
+
+    assert events
+    assert events[0]["status"] == 200
+    assert events[0]["request_id"] == "req-1"
+
+
+def test_retry_after_mapped(monkeypatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(429, text="rate", headers={"Retry-After": "5"}, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpResponsesTransport(api_key="abc", client=client)
+
+    import asyncio
+    import pytest
+
+    async def run():
+        with pytest.raises(httpx.HTTPStatusError):
+            async for _ in transport.stream_response({"foo": "bar"}):
+                pass
+        await transport.aclose()
+        await client.aclose()
+
+    asyncio.run(run())
+
+    assert calls

@@ -66,3 +66,22 @@ def test_missing_path_returns_empty(tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     entries = list_dir(boundary, path="missing", depth=1)
     assert entries == []
+
+
+def test_unrestricted_returns_absolute_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Boundary:
+        def sanitize_path(self, path):
+            return Path("/tmp/root")
+
+        def assert_within_root(self, path):
+            pass
+
+        def root_path(self):
+            return None
+
+    child = Path("/tmp/root/child")
+    monkeypatch.setattr(Path, "iterdir", lambda self: [child] if self == Path("/tmp/root") else [])
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    entries = list_dir(Boundary(), path=".")
+    assert entries == ["/tmp/root/child"]

@@ -155,3 +155,75 @@ def test_session_paths_respect_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     expected = tmp_path / "sessions" / session_id / "events.jsonl"
 
     assert session_path(session_id) == expected
+
+
+def test_jsonl_writer_fsync_and_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    writer = JsonlEventWriter(path, fsync_every=1)
+    event = sample_event()
+    writer.append(event)
+    writer.sync()
+    writer.close()
+    # reopen after close to hit _ensure_open
+    writer.append(event)
+    writer.close()
+    lines = path.read_text().splitlines()
+    assert len(lines) == 2
+
+
+def test_iter_events_skips_blank(tmp_path: Path) -> None:
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("\n", encoding="utf-8")
+    assert list(iter_events(events_path)) == []
+
+
+def test_list_sessions_nonexistent_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "missing"))
+    assert list_sessions() == []
+
+
+def test_list_sessions_skips_non_dir_and_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+    sessions_root = tmp_path / "sessions"
+    sessions_root.mkdir(parents=True, exist_ok=True)
+    (sessions_root / "random.txt").write_text("x", encoding="utf-8")  # not a dir
+    missing_dir = sessions_root / "empty"
+    missing_dir.mkdir()
+    # no events.jsonl inside, should skip
+    assert list_sessions() == []
+
+
+def test_delete_session_handles_dir_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+    base = session_path("sid1")
+    base.parent.mkdir(parents=True, exist_ok=True)
+    (base.parent / "events.jsonl").write_text("{}", encoding="utf-8")
+    # create nested directory to trigger IsADirectoryError in unlink
+    (base.parent / "subdir").mkdir()
+    delete_session("sid1")
+    # events file removed, directory still present because subdir blocks rmdir
+    assert not (base.parent / "events.jsonl").exists()
+    assert base.parent.exists()
+
+
+def test_delete_session_rmdir_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
+    base = session_path("sid2")
+    base.parent.mkdir(parents=True, exist_ok=True)
+    (base.parent / "events.jsonl").write_text("{}", encoding="utf-8")
+
+    called = {}
+
+    def fake_rmdir(self):
+        called["rmdir"] = True
+        raise OSError("busy")
+
+    monkeypatch.setattr(Path, "rmdir", fake_rmdir, raising=False)
+    delete_session("sid2")
+    assert called["rmdir"] is True
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    writer = JsonlEventWriter(tmp_path / "events.jsonl")
+    writer.close()
+    writer.close()  # should early-return
