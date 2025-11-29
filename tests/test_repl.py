@@ -7,8 +7,8 @@ import pytest
 from lincona.config import ApprovalPolicy, FsMode, LogLevel, ModelCapabilities, ReasoningEffort, Settings, Verbosity
 from lincona.openai_client.types import (
     ErrorEvent,
-    MessageDone,
     Message,
+    MessageDone,
     MessageRole,
     TextDelta,
     ToolCallDelta,
@@ -16,7 +16,7 @@ from lincona.openai_client.types import (
     ToolCallPayload,
     ToolCallStart,
 )
-from lincona.repl import AgentRunner, _ToolCallBuffer, _json_default
+from lincona.repl import AgentRunner, _json_default, _ToolCallBuffer
 from lincona.tools.apply_patch import PatchResult
 from lincona.tools.fs import FsBoundary
 from lincona.tools.router import ToolRouter
@@ -247,7 +247,9 @@ class DummyClient:
 
 
 def _stub_runner(settings, events, monkeypatch):
-    runner = AgentRunner(settings, transport=SequenceTransport([['data: {"type":"response.done"}']]), boundary_root=Path("."))
+    runner = AgentRunner(
+        settings, transport=SequenceTransport([['data: {"type":"response.done"}']]), boundary_root=Path(".")
+    )
     runner.client = DummyClient(events)
     # silence file logging/append
     runner.writer.append = lambda *a, **k: None  # type: ignore[attr-defined]

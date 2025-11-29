@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from lincona.config import LogLevel
-from lincona.logging import configure_session_logger, session_log_path, _to_logging_level
+from lincona.logging import _to_logging_level, configure_session_logger, session_log_path
 
 
 def test_session_log_path_respects_base(tmp_path: Path) -> None:

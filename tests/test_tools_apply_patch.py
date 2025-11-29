@@ -1,14 +1,14 @@
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-import tempfile
 
 import pytest
 
+import lincona.tools.apply_patch as apply_patch_mod
 from lincona.config import FsMode
 from lincona.tools.apply_patch import PatchApplyError, apply_patch
 from lincona.tools.fs import FsBoundary, FsViolationError
 from lincona.tools.patch_parser import PatchParseError
-import lincona.tools.apply_patch as apply_patch_mod
 
 
 def test_apply_simple_patch(tmp_path: Path) -> None:
@@ -247,8 +247,12 @@ def test_cleanup_tempfile_unlink_failure(monkeypatch, tmp_path: Path) -> None:
         return tmp
 
     monkeypatch.setattr(apply_patch_mod.tempfile, "NamedTemporaryFile", fake_namedtemp)
-    monkeypatch.setattr(Path, "replace", lambda self, other: (_ for _ in ()).throw(RuntimeError("boom2")), raising=False)
-    monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: (_ for _ in ()).throw(RuntimeError("unlink")), raising=False)
+    monkeypatch.setattr(
+        Path, "replace", lambda self, other: (_ for _ in ()).throw(RuntimeError("boom2")), raising=False
+    )
+    monkeypatch.setattr(
+        Path, "unlink", lambda self, missing_ok=False: (_ for _ in ()).throw(RuntimeError("unlink")), raising=False
+    )
 
     with pytest.raises(RuntimeError):
         apply_patch(boundary, "ignored2")
@@ -373,7 +377,6 @@ def test_apply_patch_cleanup_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
 def test_convert_results_closure_and_apply_hunks_branches(tmp_path: Path) -> None:
     from inspect import getclosurevars
-    from lincona.tools.patch_parser import Hunk
 
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     regs = apply_patch_mod.tool_registrations(boundary)
@@ -381,9 +384,11 @@ def test_convert_results_closure_and_apply_hunks_branches(tmp_path: Path) -> Non
     closure_vars = getclosurevars(adapter)
     convert = closure_vars.nonlocals["_convert_results"]
 
-    out = apply_patch_mod.ApplyPatchOutput(results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=False)])
+    out = apply_patch_mod.ApplyPatchOutput(
+        results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=False)]
+    )
     assert convert(out) is out  # ApplyPatchOutput passthrough
-    from lincona.tools.patch_parser import FilePatch
+
     # list[PatchResult] path
     pr = apply_patch_mod.PatchResult(path=tmp_path / "p", bytes_written=2, created=True)
     converted = convert([pr])

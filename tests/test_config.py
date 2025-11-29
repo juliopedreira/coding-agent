@@ -196,7 +196,7 @@ verbosity = []
 
 
 def test_coercion_helpers_defaults() -> None:
-    from lincona.config import _coerce_enum, _coerce_reasoning, _coerce_verbosity, _first_value, _clean_str
+    from lincona.config import _clean_str, _coerce_enum, _coerce_reasoning, _coerce_verbosity, _first_value
 
     assert _coerce_reasoning("unknown", ReasoningEffort.NONE) == ReasoningEffort.NONE
     assert _coerce_verbosity("unknown", Verbosity.LOW) == Verbosity.LOW
@@ -225,7 +225,8 @@ def test_append_section_quotes_and_skips_empty() -> None:
 
 
 def test_ensure_permissions_sets_mode(tmp_path: Path) -> None:
-    from lincona.config import _ensure_permissions, EXPECTED_FILE_MODE
+    from lincona.config import EXPECTED_FILE_MODE, _ensure_permissions
+
     cfg = tmp_path / "f"
     cfg.write_text("x", encoding="utf-8")
     cfg.chmod(0o644)
@@ -241,7 +242,7 @@ def test_get_config_value_returns_none_for_non_dict() -> None:
 
 def test_load_settings_reads_existing_file(tmp_path: Path) -> None:
     cfg = tmp_path / "config.toml"
-    cfg.write_text("[model]\nid = \"gpt-5.1-codex-mini\"\n", encoding="utf-8")
+    cfg.write_text('[model]\nid = "gpt-5.1-codex-mini"\n', encoding="utf-8")
     settings = load_settings(config_path=cfg, env={})
     assert settings.model == "gpt-5.1-codex-mini"
 

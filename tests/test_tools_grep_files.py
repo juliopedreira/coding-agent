@@ -1,10 +1,11 @@
 from pathlib import Path
-from types import SimpleNamespace
 
+import pytest
+
+import lincona.tools.grep_files as grep_mod
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
-from lincona.tools.grep_files import GrepFilesInput, grep_files
-import lincona.tools.grep_files as grep_mod
+from lincona.tools.grep_files import GrepFilesInput, GrepFilesTool, GrepFilesOutput, FileMatches, LineMatch, grep_files, tool_registrations
 
 
 def test_grep_matches_and_limit(tmp_path: Path) -> None:
@@ -136,3 +137,16 @@ def test_iter_files_skips_dirs(tmp_path: Path) -> None:
     (root / "subdir").mkdir(parents=True, exist_ok=True)
     files = list(grep_mod._iter_files(root))
     assert files == []
+
+
+def test_grep_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
+    monkeypatch.setattr(
+        "lincona.tools.grep_files.grep_files",
+        lambda boundary, **kwargs: [FileMatches(file="a", matches=[LineMatch(line_num=1, line="hit", truncated=None)])],
+    )
+    tool = GrepFilesTool(restricted_boundary)
+    output = tool.execute(GrepFilesInput(pattern="hit"))
+    assert isinstance(output, GrepFilesOutput)
+    reg = tool_registrations(restricted_boundary)[0]
+    event = reg.end_event_builder(GrepFilesInput(pattern="hit"), output)  # type: ignore[arg-type]
+    assert event["matches"] == 1

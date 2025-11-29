@@ -2,12 +2,11 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
-import lincona.config
-import lincona.openai_client.client as client_module
-
 import httpx
 import pytest
 
+import lincona.config
+import lincona.openai_client.client as client_module
 from lincona.config import ReasoningEffort
 from lincona.openai_client.client import OpenAIResponsesClient, _map_status_error
 from lincona.openai_client.transport import MockResponsesTransport

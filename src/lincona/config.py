@@ -381,9 +381,7 @@ def _first_value(*candidates: Any) -> Any:
     return None
 
 
-def _coerce_reasoning(
-    value: Any, default: ReasoningEffort | None = None
-) -> ReasoningEffort | None:
+def _coerce_reasoning(value: Any, default: ReasoningEffort | None = None) -> ReasoningEffort | None:
     if value is None:
         return default
     if isinstance(value, ReasoningEffort):
@@ -396,9 +394,7 @@ def _coerce_reasoning(
     return default
 
 
-def _coerce_verbosity(
-    value: Any, default: Verbosity | None = None
-) -> Verbosity | None:
+def _coerce_verbosity(value: Any, default: Verbosity | None = None) -> Verbosity | None:
     if value is None:
         return default
     if isinstance(value, Verbosity):

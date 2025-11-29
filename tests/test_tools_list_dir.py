@@ -4,7 +4,7 @@ import pytest
 
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary, FsViolationError
-from lincona.tools.list_dir import list_dir
+from lincona.tools.list_dir import list_dir, ListDirTool, ListDirInput, tool_registrations
 
 
 def test_lists_depth_and_limits(tmp_path: Path) -> None:
@@ -85,3 +85,13 @@ def test_unrestricted_returns_absolute_paths(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(Path, "is_symlink", lambda self: False)
     entries = list_dir(Boundary(), path=".")
     assert entries == ["/tmp/root/child"]
+
+
+def test_list_dir_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
+    monkeypatch.setattr("lincona.tools.list_dir.list_dir", lambda boundary, **kwargs: ["x/"])
+    tool = ListDirTool(restricted_boundary)
+    output = tool.execute(ListDirInput(path=".", depth=1))
+    assert output.entries == ["x/"]
+    reg = tool_registrations(restricted_boundary)[0]
+    event = reg.end_event_builder(ListDirInput(path=".", depth=1), output)  # type: ignore[arg-type]
+    assert event["count"] == 1

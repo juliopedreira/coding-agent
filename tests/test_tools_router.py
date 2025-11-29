@@ -1,137 +1,209 @@
+
 import pytest
+
 import lincona.tools.router as router_module
-from types import SimpleNamespace
-
-from lincona.config import ApprovalPolicy, FsMode
+from lincona.config import ApprovalPolicy
+from lincona.tools.apply_patch import ApplyPatchInput, ApplyPatchOutput, PatchResultModel
 from lincona.tools.approval import ApprovalRequiredError
-from lincona.tools.fs import FsBoundary
+from lincona.tools.exec_pty import ExecCommandInput, ExecCommandOutput, PtyManager, WriteStdinInput, WriteStdinOutput
+from lincona.tools.grep_files import FileMatches, GrepFilesInput, GrepFilesOutput, LineMatch
+from lincona.tools.list_dir import ListDirInput, ListDirOutput
+from lincona.tools.read_file import ReadFileInput, ReadFileOutput
+from lincona.tools.registry import ToolRegistration
 from lincona.tools.router import ToolRouter, tool_specs
-from lincona.tools.list_dir import ListDirInput
-from lincona.tools.read_file import ReadFileInput
-from lincona.tools.grep_files import GrepFilesInput
-from lincona.tools.apply_patch import ApplyPatchInput
-from lincona.tools.shell import ShellInput
-from lincona.tools.exec_pty import ExecCommandInput, WriteStdinInput, PtyManager
+from lincona.tools.shell import ShellInput, ShellOutput
 
 
-def test_tool_specs_contains_tools() -> None:
+@pytest.fixture(autouse=True)
+def stub_tool_registrations(monkeypatch: pytest.MonkeyPatch):
+    """Stub tool registrations to avoid real filesystem/process work."""
+
+    def _registrations(boundary, pty_manager=None):
+        return [
+            ToolRegistration(
+                name="list_dir",
+                description="",
+                input_model=ListDirInput,
+                output_model=ListDirOutput,
+                handler=lambda req: ListDirOutput(entries=["a/", "file.txt"]),
+                result_adapter=lambda out: out.entries,
+                end_event_builder=lambda req, out: {"count": len(out.entries)},
+            ),
+            ToolRegistration(
+                name="read_file",
+                description="",
+                input_model=ReadFileInput,
+                output_model=ReadFileOutput,
+                handler=lambda req: ReadFileOutput(text="hello\nworld\n", truncated=False),
+                result_adapter=lambda out: (out.text, out.truncated),
+                end_event_builder=lambda req, out: {"truncated": out.truncated},
+            ),
+            ToolRegistration(
+                name="grep_files",
+                description="",
+                input_model=GrepFilesInput,
+                output_model=GrepFilesOutput,
+                handler=lambda req: GrepFilesOutput(
+                    results=[FileMatches(file="a.txt", matches=[LineMatch(line_num=1, line="todo", truncated=False)])]
+                ),
+                result_adapter=lambda out: [res.model_dump() for res in out.results],
+                end_event_builder=lambda req, out: {"files": len(out.results)},
+            ),
+            ToolRegistration(
+                name="apply_patch_json",
+                description="",
+                input_model=ApplyPatchInput,
+                output_model=ApplyPatchOutput,
+                handler=lambda req: ApplyPatchOutput(
+                    results=[PatchResultModel(path="new.txt", bytes_written=2, created=True)]
+                ),
+                requires_approval=True,
+                result_adapter=lambda out: [res.model_dump() for res in out.results],
+                end_event_builder=lambda req, out: {"files": len(out.results)},
+            ),
+            ToolRegistration(
+                name="apply_patch_freeform",
+                description="",
+                input_model=ApplyPatchInput,
+                output_model=ApplyPatchOutput,
+                handler=lambda req: ApplyPatchOutput(
+                    results=[PatchResultModel(path="f.txt", bytes_written=1, created=False)]
+                ),
+                requires_approval=True,
+                result_adapter=lambda out: [res.model_dump() for res in out.results],
+                end_event_builder=lambda req, out: {"files": len(out.results)},
+            ),
+            ToolRegistration(
+                name="shell",
+                description="",
+                input_model=ShellInput,
+                output_model=ShellOutput,
+                handler=lambda req: ShellOutput(
+                    stdout="hi",
+                    stderr="",
+                    returncode=0,
+                    stdout_truncated=False,
+                    stderr_truncated=False,
+                    timeout=False,
+                    message=None,
+                ),
+                requires_approval=True,
+                result_adapter=lambda out: out.model_dump(),
+                end_event_builder=lambda req, out: {"returncode": out.returncode, "timeout": out.timeout},
+            ),
+            ToolRegistration(
+                name="exec_command",
+                description="",
+                input_model=ExecCommandInput,
+                output_model=ExecCommandOutput,
+                handler=lambda req: ExecCommandOutput(output="ok", truncated=False),
+                requires_approval=True,
+                result_adapter=lambda out: out.model_dump(),
+                end_event_builder=lambda req, out: {
+                    "session_id": req.session_id,
+                    "truncated": out.truncated,
+                    "returncode": None,
+                },
+            ),
+            ToolRegistration(
+                name="write_stdin",
+                description="",
+                input_model=WriteStdinInput,
+                output_model=WriteStdinOutput,
+                handler=lambda req: WriteStdinOutput(output="pong", truncated=False),
+                requires_approval=True,
+                result_adapter=lambda out: out.model_dump(),
+                end_event_builder=lambda req, out: {
+                    "session_id": req.session_id,
+                    "truncated": out.truncated,
+                    "returncode": None,
+                },
+            ),
+        ]
+
+    monkeypatch.setattr(router_module, "get_tool_registrations", _registrations)
+
+
+def _make_router(boundary, approval=ApprovalPolicy.NEVER, **kwargs):
+    return ToolRouter(boundary, approval, **kwargs)
+
+
+def test_tool_specs_contains_tools():
     names = {spec["function"]["name"] for spec in tool_specs()}
     assert {"list_dir", "read_file", "grep_files", "apply_patch_freeform", "shell"}.issubset(names)
 
 
-def test_dispatch_list_dir(tmp_path):
-    (tmp_path / "a").mkdir()
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-
+def test_dispatch_list_dir(restricted_boundary):
+    router = _make_router(restricted_boundary)
     entries = router.dispatch("list_dir", path=".", depth=1)
+    assert "file.txt" in entries
 
-    assert "a/" in entries
 
-
-def test_dispatch_apply_patch_honors_approval(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.ALWAYS)
-    patch = """--- a/file.txt
-+++ b/file.txt
-@@ -0,0 +1,1 @@
-+hi
-"""
+def test_dispatch_apply_patch_honors_approval(restricted_boundary):
+    router = _make_router(restricted_boundary, ApprovalPolicy.ALWAYS)
     with pytest.raises(ApprovalRequiredError):
-        router.dispatch("apply_patch_json", patch=patch)
+        router.dispatch("apply_patch_json", patch="ignored")
 
 
-def test_dispatch_exec_command_uses_manager(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-    result = router.dispatch("exec_command", session_id="s1", cmd="echo hi", workdir=tmp_path)
-
-    assert "hi" in result["output"]
+def test_dispatch_exec_command_uses_manager(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    result = router.dispatch("exec_command", session_id="s1", cmd="echo hi", workdir=".")
+    assert result["output"] == "ok"
 
 
-def test_dispatch_shell_blocked_by_approval(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.ALWAYS)
-
+def test_dispatch_shell_blocked_by_approval(restricted_boundary):
+    router = _make_router(restricted_boundary, ApprovalPolicy.ALWAYS)
     with pytest.raises(ApprovalRequiredError):
         router.dispatch("shell", command="echo hi")
 
 
-def test_dispatch_apply_patch_freeform(tmp_path):
-    target = tmp_path / "f.txt"
-    target.write_text("old\n", encoding="utf-8")
-    patch = """*** Begin Patch
-*** Update File: f.txt
-@@ -1,1 +1,1 @@
--old
-+new
-*** End Patch"""
-
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-
-    router.dispatch("apply_patch_freeform", patch=patch)
-
-    assert target.read_text(encoding="utf-8") == "new\n"
-
-
-def test_dispatch_apply_patch_json(tmp_path):
-    patch = """--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1,1 @@
-+hi
-"""
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-
-    router.dispatch("apply_patch_json", patch=patch)
-
-    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hi"
+def test_dispatch_apply_patch_freeform(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    res = router.dispatch("apply_patch_freeform", patch="ignored")
+    assert res[0]["path"] == "f.txt"
     assert router.events[-1]["files"] == 1
 
 
-def test_dispatch_unknown_tool_raises(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
+def test_dispatch_apply_patch_json(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    res = router.dispatch("apply_patch_json", patch="ignored")
+    assert any(entry.get("created") for entry in res)
+    assert router.events[-1]["files"] == 1
 
+
+def test_dispatch_unknown_tool_raises(restricted_boundary):
+    router = _make_router(restricted_boundary)
     with pytest.raises(ValueError):
         router.dispatch("unknown_tool")
 
 
-def test_dispatch_write_stdin(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
+def test_dispatch_write_stdin(restricted_boundary):
+    router = _make_router(restricted_boundary)
     router.dispatch("exec_command", session_id="s2", cmd="cat")
     result = router.dispatch("write_stdin", session_id="s2", chars="ping\n")
-    assert "ping" in result["output"]
+    assert "pong" in result["output"]
     assert any(e for e in router.events if e["tool"] == "write_stdin" and e["phase"] == "end")
 
 
-def test_router_registers_shutdown_manager(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+def test_router_registers_shutdown_manager(restricted_boundary):
     called = {}
 
     class Shutdown:
         def register_pty_manager(self, mgr):
             called["mgr"] = mgr
 
-    ToolRouter(boundary, ApprovalPolicy.NEVER, shutdown_manager=Shutdown())
+    _make_router(restricted_boundary, shutdown_manager=Shutdown())
     assert "mgr" in called
 
 
-def test_router_registers_shutdown_manager_non_callable(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-
+def test_router_registers_shutdown_manager_non_callable(restricted_boundary):
     class Shutdown:
         register_pty_manager = None
 
-    # should not raise even if attribute is non-callable
-    ToolRouter(boundary, ApprovalPolicy.NEVER, shutdown_manager=Shutdown())
+    _make_router(restricted_boundary, shutdown_manager=Shutdown())
 
 
-def test_router_logs_requests_and_responses(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-
+def test_router_logs_requests_and_responses(restricted_boundary):
     class Logger:
         def __init__(self):
             self.logged = {"info": [], "debug": []}
@@ -143,7 +215,7 @@ def test_router_logs_requests_and_responses(tmp_path):
             self.logged["debug"].append(msg % args)
 
     logger = Logger()
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER, logger=logger)
+    router = _make_router(restricted_boundary, logger=logger)
     router.dispatch("list_dir", path=".", depth=0)
     assert logger.logged["info"] and logger.logged["debug"]
 
@@ -160,7 +232,7 @@ def test_stringify_repr_fallback():
             raise TypeError("no str")
 
     result = ToolRouter._stringify({"a": {1, 2}})  # set not JSON-serializable
-    assert "[1, 2]" not in result or result.startswith("{")
+    assert result.startswith("{")
     assert "Bad" in ToolRouter._stringify(Bad())
 
 
@@ -219,46 +291,23 @@ def test_inline_schema_skips_items_without_ref():
     assert "b" in resolved.get("properties", {})
 
 
-def test_router_emits_start_and_end(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-    (tmp_path / "file.txt").write_text("data", encoding="utf-8")
-
+def test_router_emits_start_and_end(restricted_boundary):
+    router = _make_router(restricted_boundary)
     router.dispatch("list_dir", path=".", depth=1)
-
     assert router.events[0]["phase"] == "start"
-    assert router.events[-1]["phase"] in {"start", "end"}
+    assert router.events[-1]["phase"] == "end"
 
 
-def test_router_shell_end_event(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.NEVER)
-    router.dispatch("shell", command="echo hi", workdir=tmp_path)
+def test_router_shell_end_event(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    router.dispatch("shell", command="echo hi", workdir=".")
     assert any(e for e in router.events if e["tool"] == "shell" and e["phase"] == "end")
 
 
-def test_router_approval_blocks_on_request(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    router = ToolRouter(boundary, ApprovalPolicy.ON_REQUEST)
-    patch = """--- a/file.txt
-+++ b/file.txt
-@@ -0,0 +1,1 @@
-+hi
-"""
+def test_router_approval_blocks_on_request(restricted_boundary):
+    router = _make_router(restricted_boundary, ApprovalPolicy.ON_REQUEST)
     with pytest.raises(ApprovalRequiredError):
-        router.dispatch("apply_patch_json", patch=patch)
-
-
-def test_router_registers_pty_with_shutdown(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    seen = SimpleNamespace(count=0)
-
-    class DummyShutdown:
-        def register_pty_manager(self, mgr):
-            seen.count += 1
-
-    ToolRouter(boundary, ApprovalPolicy.NEVER, shutdown_manager=DummyShutdown())
-    assert seen.count == 1
+        router.dispatch("apply_patch_json", patch="ignored")
 
 
 @pytest.mark.parametrize(
@@ -283,9 +332,8 @@ def test_schema_no_path_format(model):
         assert fmt not in {"path", "Path"}
 
 
-def test_tool_specs_all_functions(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    specs = tool_specs(boundary, PtyManager(boundary))
+def test_tool_specs_all_functions(restricted_boundary):
+    specs = tool_specs(restricted_boundary, PtyManager(restricted_boundary))
     names = {spec["function"]["name"] for spec in specs if "function" in spec}
     expected = {
         "list_dir",
@@ -300,16 +348,8 @@ def test_tool_specs_all_functions(tmp_path):
     assert expected.issubset(names)
 
 
-def _make_router(tmp_path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    return ToolRouter(boundary, ApprovalPolicy.NEVER)
-
-
-def test_router_list_dir_and_read_file(tmp_path):
-    target = tmp_path / "file.txt"
-    target.write_text("hello\nworld\n", encoding="utf-8")
-
-    router = _make_router(tmp_path)
+def test_router_list_dir_and_read_file(restricted_boundary):
+    router = _make_router(restricted_boundary)
     entries = router.dispatch("list_dir", path=".", depth=1)
     assert "file.txt" in entries
 
@@ -318,40 +358,31 @@ def test_router_list_dir_and_read_file(tmp_path):
     assert truncated is False
 
 
-def test_router_grep_files(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("todo: fix\n", encoding="utf-8")
-    router = _make_router(tmp_path)
-
+def test_router_grep_files(restricted_boundary):
+    router = _make_router(restricted_boundary)
     results = router.dispatch("grep_files", pattern="todo", path=".", include=["*.txt"], limit=10)
-    assert results
     assert results[0]["file"] == "a.txt"
     assert results[0]["matches"][0]["line_num"] == 1
 
 
-def test_router_apply_patch_and_read_back(tmp_path):
-    patch = """--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1,1 @@
-+hi
-"""
-    router = _make_router(tmp_path)
-    res = router.dispatch("apply_patch_json", patch=patch)
+def test_router_apply_patch_and_read_back(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    res = router.dispatch("apply_patch_json", patch="ignored")
     assert any(entry.get("created") for entry in res)
-    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hi"
+    assert router.events[-1]["files"] == 1
 
 
-def test_router_shell_runs_command(tmp_path):
-    router = _make_router(tmp_path)
-    result = router.dispatch("shell", command="echo hi", workdir=str(tmp_path), timeout_ms=5000)
-    assert result["stdout"].strip() == "hi"
+def test_router_shell_runs_command(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    result = router.dispatch("shell", command="echo hi", workdir=".", timeout_ms=5000)
+    assert result["stdout"] == "hi"
     assert result["returncode"] == 0
 
 
-def test_router_exec_and_write_stdin(tmp_path):
-    router = _make_router(tmp_path)
-    out1 = router.dispatch("exec_command", session_id="s1", cmd="cat", workdir=str(tmp_path))
-    assert "output" in out1
+def test_router_exec_and_write_stdin(restricted_boundary):
+    router = _make_router(restricted_boundary)
+    out1 = router.dispatch("exec_command", session_id="s1", cmd="cat", workdir=".")
+    assert out1["output"] == "ok"
     out2 = router.dispatch("write_stdin", session_id="s1", chars="ping\n")
-    assert "ping" in out2["output"]
+    assert "pong" in out2["output"]
     router.pty_manager.close_all()

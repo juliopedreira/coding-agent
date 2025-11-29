@@ -4,6 +4,9 @@ import sys
 
 import pytest
 
+from lincona.config import FsMode
+from lincona.tools.fs import FsBoundary
+
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 
@@ -13,12 +16,8 @@ if str(SRC_PATH) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_lincona_home(monkeypatch):
-    """Ensure tests never touch the user's real ~/.lincona.
-
-    We point LINCONA_HOME to a repo-local .work directory and wipe it before
-    each test for isolation.
-    """
+def _isolate_lincona_home(monkeypatch: pytest.MonkeyPatch):
+    """Point LINCONA_HOME at a repo-local sandbox so we never touch the real FS."""
 
     home = PROJECT_ROOT / ".work"
     if home.exists():
@@ -29,10 +28,17 @@ def _isolate_lincona_home(monkeypatch):
 
 
 @pytest.fixture
+def restricted_boundary(tmp_path: pathlib.Path) -> FsBoundary:
+    """Shared restricted FsBoundary rooted in a temporary sandbox."""
+
+    return FsBoundary(FsMode.RESTRICTED, root=tmp_path)
+
+
+@pytest.fixture
 def dummy_tool_classes():
     """Provide simple Tool/Registration-friendly classes for reuse."""
 
-    from lincona.tools.base import ToolRequest, ToolResponse, Tool
+    from lincona.tools.base import Tool, ToolRequest, ToolResponse
 
     class EchoRequest(ToolRequest):
         msg: str

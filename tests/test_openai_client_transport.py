@@ -264,7 +264,9 @@ def test_map_openai_event_missing_arguments_delta_returns_none():
 
 
 def test_map_openai_event_done_missing_call_id_returns_none():
-    evt = type("E", (), {"type": "response.function_call_arguments.done", "item_id": None, "arguments": "{}", "name": "n"})
+    evt = type(
+        "E", (), {"type": "response.function_call_arguments.done", "item_id": None, "arguments": "{}", "name": "n"}
+    )
     assert _map_openai_event(evt) is None
 
 
@@ -351,6 +353,7 @@ def test_retry_after_mapped(monkeypatch):
     transport = HttpResponsesTransport(api_key="abc", client=client)
 
     import asyncio
+
     import pytest
 
     async def run():

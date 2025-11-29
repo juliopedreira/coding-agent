@@ -4,7 +4,7 @@ import pytest
 
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
-from lincona.tools.read_file import read_file
+from lincona.tools.read_file import read_file, ReadFileTool, ReadFileInput, ReadFileOutput, tool_registrations
 
 
 def test_reads_slice_and_truncates_lines(tmp_path: Path) -> None:
@@ -44,3 +44,13 @@ def test_invalid_mode_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         read_file(boundary, "f.txt", mode="invalid")
+
+
+def test_read_file_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
+    monkeypatch.setattr("lincona.tools.read_file.read_file", lambda boundary, **kwargs: ("ok", False))
+    tool = ReadFileTool(restricted_boundary)
+    output = tool.execute(ReadFileInput(path="f.txt"))
+    assert isinstance(output, ReadFileOutput)
+    reg = tool_registrations(restricted_boundary)[0]
+    event = reg.end_event_builder(ReadFileInput(path="f.txt"), output)  # type: ignore[arg-type]
+    assert event["truncated"] is False

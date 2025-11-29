@@ -1,31 +1,65 @@
-from pathlib import Path
 import os
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import lincona.tools.exec_pty as exec_mod
 from lincona.config import FsMode
-from lincona.tools.exec_pty import PtyManager, tool_registrations
+from lincona.tools.exec_pty import (
+    ExecCommandInput,
+    ExecCommandOutput,
+    WriteStdinInput,
+    WriteStdinOutput,
+    ExecTool,
+    WriteStdinTool,
+    PtyManager,
+    tool_registrations,
+)
 from lincona.tools.fs import FsBoundary
 
 
-def test_exec_command_outputs(tmp_path: Path) -> None:
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    manager = PtyManager(boundary, max_bytes=1024, max_lines=50)
+@pytest.fixture
+def fake_pty(monkeypatch: pytest.MonkeyPatch):
+    """Stub out PTY creation and process spawning to avoid real OS interaction."""
 
-    result = manager.exec_command("s1", "echo hello", workdir=tmp_path)
+    proc = SimpleNamespace(
+        returncode=None,
+        terminate=lambda self=None: None,
+        kill=lambda self=None: None,
+        wait=lambda self=None, timeout=2: None,
+    )
+    monkeypatch.setattr(exec_mod.pty, "openpty", lambda: (11, 12))
+    monkeypatch.setattr(exec_mod.subprocess, "Popen", lambda *a, **k: proc)
+    monkeypatch.setattr(exec_mod.os, "close", lambda fd: None)
+    return proc
 
-    assert "hello" in result["output"]
-    assert result["truncated"] is False
+
+def test_exec_command_outputs(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+    manager = PtyManager(restricted_boundary, max_bytes=1024, max_lines=50)
+    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "hello", "truncated": False})
+
+    result = manager.exec_command("s1", "echo hello", workdir=".")
+
+    assert result["output"] == "hello"
+    assert manager.sessions["s1"].proc is fake_pty
 
 
-def test_write_stdin_appends_output(tmp_path: Path) -> None:
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    manager = PtyManager(boundary)
+def test_write_stdin_appends_output(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+    manager = PtyManager(restricted_boundary)
+    monkeypatch.setattr(exec_mod.os, "write", lambda fd, data: len(data))
+    responses = iter(
+        [
+            {"output": "init", "truncated": False},
+            {"output": "hi", "truncated": False},
+        ]
+    )
+    monkeypatch.setattr(manager, "_read", lambda sid: next(responses))
 
-    manager.exec_command("s2", "cat", workdir=tmp_path)
+    manager.exec_command("s2", "cat", workdir=".")
     result = manager.write_stdin("s2", "hi\n")
 
-    assert "hi" in result["output"]
+    assert result["output"] == "hi"
 
 
 def test_missing_session_raises(tmp_path: Path) -> None:
@@ -36,20 +70,20 @@ def test_missing_session_raises(tmp_path: Path) -> None:
         manager.write_stdin("missing", "data")
 
 
-def test_truncation_in_pty(tmp_path: Path) -> None:
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    manager = PtyManager(boundary, max_bytes=10, max_lines=2)
+def test_truncation_in_pty(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+    manager = PtyManager(restricted_boundary, max_bytes=10, max_lines=2)
+    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "123\n[truncated]", "truncated": True})
 
-    result = manager.exec_command("s3", "printf '1234567890abcd'")
+    result = manager.exec_command("s3", "ignored")
 
     assert result["truncated"] is True
     assert result["output"].endswith("[truncated]")
 
 
-def test_close_all_clears_sessions(tmp_path: Path) -> None:
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    manager = PtyManager(boundary)
-    manager.exec_command("s4", "echo hi", workdir=tmp_path)
+def test_close_all_clears_sessions(restricted_boundary, fake_pty, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = PtyManager(restricted_boundary)
+    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "", "truncated": False})
+    manager.exec_command("s4", "echo hi", workdir=".")
     assert "s4" in manager.sessions
     manager.close_all()
     assert manager.sessions == {}
@@ -108,15 +142,12 @@ def test_close_all_handles_exceptions(monkeypatch):
     manager.close_all()  # should swallow and continue
 
 
-def test_close_handles_closed_fd(monkeypatch, tmp_path: Path):
-    boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    mgr = PtyManager(boundary)
-    result = mgr.exec_command("s1", "sleep 1", workdir=tmp_path)
-    assert "output" in result
+def test_close_handles_closed_fd(monkeypatch, restricted_boundary, fake_pty):
+    mgr = PtyManager(restricted_boundary)
+    monkeypatch.setattr(mgr, "_read", lambda sid: {"output": "", "truncated": False})
+    mgr.exec_command("s1", "sleep 1", workdir=".")
     session = mgr.sessions["s1"]
-    import os
-
-    os.close(session.fd)
+    monkeypatch.setattr(os, "close", lambda fd: None)
     mgr.close("s1")  # should not raise
 
 
@@ -168,3 +199,67 @@ def test_end_event_builder_handles_missing_session(tmp_path: Path):
     dummy_output = type("O", (), {"truncated": True})
     data = end_builder(dummy_validated, dummy_output)  # type: ignore[arg-type]
     assert data["session_id"] is None
+
+
+def test_exec_command_input_casts_path_workdir():
+    validated = ExecCommandInput.model_validate({"session_id": "s", "cmd": "echo", "workdir": Path("/tmp/work")})
+    assert isinstance(validated.workdir, str)
+
+
+def test_read_breaks_on_os_error(monkeypatch):
+    boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
+    manager = PtyManager(boundary)
+    manager.sessions["err"] = type("S", (), {"proc": None, "fd": 55, "cwd": Path(".")})
+    manager._cumulative["err"] = 0
+    monkeypatch.setattr("select.select", lambda fds, *_: (fds, [], []))
+    monkeypatch.setattr("os.read", lambda fd, size: (_ for _ in ()).throw(OSError("bad fd")))
+    result = manager._read("err")
+    assert result["output"] == ""
+
+
+def test_read_accumulates_and_marks_truncated(monkeypatch):
+    boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
+    manager = PtyManager(boundary, max_bytes=2, max_lines=10)
+    manager.sessions["sidacc"] = type("S", (), {"proc": None, "fd": 77, "cwd": Path(".")})
+    manager._cumulative["sidacc"] = 0
+    monkeypatch.setattr("select.select", lambda fds, *_: (fds, [], []))
+    monkeypatch.setattr("os.read", lambda fd, size: b"abc")
+    monkeypatch.setattr("lincona.tools.exec_pty.truncate_output", lambda text, max_bytes, max_lines: (text, False))
+    result = manager._read("sidacc")
+    assert result["output"].endswith("[truncated]")
+
+
+def test_close_handles_os_error(monkeypatch):
+    boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
+    manager = PtyManager(boundary)
+    manager.sessions["sid"] = type("S", (), {"proc": SimpleNamespace(terminate=lambda: None, wait=lambda timeout=2: None, kill=lambda: None), "fd": 90, "cwd": Path(".")})
+    manager._cumulative["sid"] = 0
+    monkeypatch.setattr("lincona.tools.exec_pty.os.close", lambda fd: (_ for _ in ()).throw(OSError("closed")))
+    manager.close("sid")
+    assert "sid" not in manager.sessions
+
+
+def test_exec_and_write_tools_use_manager(monkeypatch):
+    class DummyMgr:
+        def exec_command(self, **kwargs):
+            return {"output": "ok", "truncated": False}
+
+        def write_stdin(self, **kwargs):
+            return {"output": "pong", "truncated": False}
+
+    mgr = DummyMgr()
+    exec_tool = ExecTool(mgr)  # type: ignore[arg-type]
+    write_tool = WriteStdinTool(mgr)  # type: ignore[arg-type]
+    exec_output = exec_tool.execute(ExecCommandInput(session_id="s", cmd="echo", workdir="."))
+    write_output = write_tool.execute(WriteStdinInput(session_id="s", chars="hi"))
+    assert exec_output.output == "ok" and write_output.output == "pong"
+
+
+def test_end_event_builder_with_session(monkeypatch, restricted_boundary):
+    manager = PtyManager(restricted_boundary)
+    regs = tool_registrations(restricted_boundary, manager)
+    manager.sessions["s"] = SimpleNamespace(proc=SimpleNamespace(returncode=5), fd=1, cwd=Path("."))
+    validated = ExecCommandInput(session_id="s", cmd="echo", workdir=".")
+    output = ExecCommandOutput(output="", truncated=False)
+    event = regs[0].end_event_builder(validated, output)  # type: ignore[arg-type]
+    assert event["returncode"] == 5 and event["session_id"] == "s"
