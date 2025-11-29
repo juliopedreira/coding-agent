@@ -957,6 +957,86 @@ def fake_sdk_client_factory():
     return FakeSDKClient
 
 
+@pytest.fixture(scope="session")
+def failing_sdk_client_factory():
+    """Factory fixture for creating SDK clients that raise HTTPStatusError (session-scoped for speed)."""
+
+    def _factory(status_code: int = 400, text: str = "bad", url: str = "https://api.test"):
+        """Create a failing SDK client that raises HTTPStatusError.
+
+        Args:
+            status_code: HTTP status code for the error response
+            text: Response body text
+            url: Request URL
+
+        Returns:
+            Client class that raises HTTPStatusError when create() is called
+        """
+        import httpx
+
+        request = httpx.Request("POST", url)
+        response = httpx.Response(status_code, text=text, request=request)
+
+        class FailingClient:
+            class responses:  # type: ignore[invalid-name]
+                @staticmethod
+                async def create(**kwargs):
+                    raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+        return FailingClient()
+
+    return _factory
+
+
+@pytest.fixture
+def failing_router_factory():
+    """Factory fixture for creating routers that raise errors on dispatch."""
+
+    def _factory(error: Exception | None = None, error_message: str = "bad"):
+        """Create a router that raises an error when dispatch is called.
+
+        Args:
+            error: Exception instance to raise (default: RuntimeError with error_message)
+            error_message: Error message if error is None
+
+        Returns:
+            Router instance that raises error on dispatch
+        """
+        if error is None:
+            error = RuntimeError(error_message)
+
+        class FailingRouter:
+            def dispatch(self, name: str, **kwargs):
+                raise error
+
+        return FailingRouter()
+
+    return _factory
+
+
+@pytest.fixture
+def dataclass_router_factory():
+    """Factory fixture for creating routers that return dataclass results."""
+
+    def _factory(return_value: Any):
+        """Create a router that returns a specific value on dispatch.
+
+        Args:
+            return_value: Value to return from dispatch
+
+        Returns:
+            Router instance that returns return_value on dispatch
+        """
+
+        class DataclassRouter:
+            def dispatch(self, name: str, **kwargs):
+                return return_value
+
+        return DataclassRouter()
+
+    return _factory
+
+
 # ============================================================================
 # Patch Pattern Fixtures
 # ============================================================================
@@ -1029,7 +1109,34 @@ def mock_named_temporary_file(mocker):
 
 
 @pytest.fixture
-def httpx_response_factory():
+def httpx_request_factory():
+    """Factory fixture for creating httpx.Request objects with common configurations.
+
+    Returns a function that creates httpx.Request objects with customizable method, URL, and headers.
+    """
+
+    def _factory(
+        method: str = "POST",
+        url: str = "https://example.com",
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Request:
+        """Create an httpx.Request object.
+
+        Args:
+            method: HTTP method (default: POST)
+            url: Request URL (default: https://example.com)
+            headers: Optional request headers
+
+        Returns:
+            httpx.Request object
+        """
+        return httpx.Request(method, url, headers=headers or {})
+
+    return _factory
+
+
+@pytest.fixture
+def httpx_response_factory(httpx_request_factory):
     """Factory fixture for creating httpx.Response objects with common configurations.
 
     Returns a function that creates httpx.Response objects with customizable status codes,
@@ -1054,7 +1161,7 @@ def httpx_response_factory():
             httpx.Response object
         """
         if request is None:
-            request = httpx.Request("POST", "https://example.com")
+            request = httpx_request_factory()
         return httpx.Response(status_code, request=request, headers=headers or {}, text=text)
 
     return _factory

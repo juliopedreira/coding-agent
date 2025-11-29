@@ -215,6 +215,7 @@ def test_message_to_content_includes_tool_call_id() -> None:
     ],
 )
 def test_status_error_mapping_function(
+    httpx_request_factory,
     httpx_response_factory,
     status_code: int,
     headers: dict[str, str] | None,
@@ -222,7 +223,7 @@ def test_status_error_mapping_function(
     error_message_contains: str | None,
 ) -> None:
     """Test status error mapping using parameterization to reduce redundancy."""
-    request = httpx.Request("POST", "https://example.com")
+    request = httpx_request_factory()
     response = httpx_response_factory(status_code=status_code, request=request, headers=headers)
     err = httpx.HTTPStatusError("test", request=request, response=response)
 

@@ -117,15 +117,12 @@ async def test_slash_commands_update_state(
     assert runner.fs_mode == FsMode.UNRESTRICTED
 
 
-def test_execute_tools_serializes_patch_result(settings, tmp_path, success_transport):
+def test_execute_tools_serializes_patch_result(settings, tmp_path, success_transport, dataclass_router_factory):
     runner = AgentRunner(settings, transport=success_transport, boundary_root=tmp_path)
 
     # replace router dispatch to return a dataclass result
-    class DataclassRouter:
-        def dispatch(self, name: str, **kwargs):
-            return PatchResult(path=tmp_path / "x.txt", bytes_written=4, created=True)
-
-    runner.router = DataclassRouter()  # type: ignore[assignment]
+    router = dataclass_router_factory(PatchResult(path=tmp_path / "x.txt", bytes_written=4, created=True))
+    runner.router = router  # type: ignore[assignment]
     msgs = runner._execute_tools(
         [_ToolCallBuffer(tool_call=ToolCallPayload(id="p1", name="apply_patch_json", arguments="{}"), arguments="{}")]
     )
@@ -212,16 +209,15 @@ async def test_handle_stream_error_branch(settings, mocker, no_session_io, seque
     assert "boom" in output or "RuntimeError" in output
 
 
-def test_execute_tools_dispatch_failure(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
+def test_execute_tools_dispatch_failure(
+    settings, mocker, no_session_io, sequence_transport, dummy_client_factory, failing_router_factory
+):
     runner = _stub_runner(
         settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
     )
 
-    class FailingRouter:
-        def dispatch(self, name: str, **kwargs):
-            raise RuntimeError("bad")
-
-    runner.router = FailingRouter()  # type: ignore[assignment]
+    router = failing_router_factory(error_message="bad")
+    runner.router = router  # type: ignore[assignment]
     buf = _ToolCallBuffer(tool_call=ToolCallPayload(id="x", name="noop", arguments="{}"), arguments="{}")
     messages = runner._execute_tools([buf])
     assert "bad" in messages[0][0].content

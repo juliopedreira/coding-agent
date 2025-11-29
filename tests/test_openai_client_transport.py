@@ -191,17 +191,9 @@ async def test_http_transport_aclose_owned_client():
 
 
 @pytest.mark.asyncio
-async def test_sdk_transport_raises_http_status_with_body():
-    request = httpx.Request("POST", "https://api.test")
-    response = httpx.Response(400, text="bad", request=request)
-
-    class FailingClient:
-        class responses:  # type: ignore[invalid-name]
-            @staticmethod
-            async def create(**kwargs):
-                raise httpx.HTTPStatusError("boom", request=request, response=response)
-
-    transport = OpenAISDKResponsesTransport(api_key="x", client=FailingClient())
+async def test_sdk_transport_raises_http_status_with_body(failing_sdk_client_factory):
+    failing_client = failing_sdk_client_factory(status_code=400, text="bad", url="https://api.test")
+    transport = OpenAISDKResponsesTransport(api_key="x", client=failing_client)
     with pytest.raises(httpx.HTTPStatusError) as excinfo:
         async for _ in transport.stream_response({"hello": "world"}):
             pass
