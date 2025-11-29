@@ -1,5 +1,4 @@
 import asyncio
-from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 import httpx
@@ -27,20 +26,9 @@ from lincona.openai_client.types import (
 )
 
 
-class CapturingTransport:
-    def __init__(self, chunks: list[str]) -> None:
-        self.chunks = chunks
-        self.last_payload: Mapping[str, Any] | None = None
-
-    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-        self.last_payload = payload
-        for chunk in self.chunks:
-            yield chunk
-
-
 @pytest.mark.asyncio
-async def test_builds_payload_and_streams_events() -> None:
-    transport = CapturingTransport(
+async def test_builds_payload_and_streams_events(capturing_transport) -> None:
+    transport = capturing_transport(
         chunks=[
             'data: {"type":"text_delta","delta":{"text":"hello"}}\n',
             "data: [DONE]\n",
@@ -73,8 +61,8 @@ async def test_builds_payload_and_streams_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_includes_freeform_tool() -> None:
-    transport = CapturingTransport(chunks=["data: [DONE]\n"])
+async def test_includes_freeform_tool(capturing_transport) -> None:
+    transport = capturing_transport(chunks=["data: [DONE]\n"])
     client = OpenAIResponsesClient(transport)
 
     request = ConversationRequest(
@@ -92,8 +80,8 @@ async def test_includes_freeform_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_messages_are_filtered_from_payload() -> None:
-    transport = CapturingTransport(chunks=["data: [DONE]\n"])
+async def test_tool_messages_are_filtered_from_payload(capturing_transport) -> None:
+    transport = capturing_transport(chunks=["data: [DONE]\n"])
     client = OpenAIResponsesClient(transport)
 
     request = ConversationRequest(
@@ -135,6 +123,8 @@ async def test_http_errors_are_mapped() -> None:
 
 @pytest.mark.asyncio
 async def test_timeout_and_request_error_mapping() -> None:
+    from collections.abc import AsyncIterator, Mapping
+
     class TimeoutTransport:
         async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
             raise httpx.ReadTimeout("timeout")
@@ -157,6 +147,8 @@ async def test_timeout_and_request_error_mapping() -> None:
 
 @pytest.mark.asyncio
 async def test_streaming_parse_error_yields_error_event() -> None:
+    from collections.abc import AsyncIterator, Mapping
+
     class BadTransport:
         async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
             yield "data: {not-json"
@@ -170,6 +162,8 @@ async def test_streaming_parse_error_yields_error_event() -> None:
 
 @pytest.mark.asyncio
 async def test_api_error_passthrough() -> None:
+    from collections.abc import AsyncIterator, Mapping
+
     class ApiErrorTransport:
         async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
             raise ApiRateLimitError("slow")
@@ -182,6 +176,8 @@ async def test_api_error_passthrough() -> None:
 
 @pytest.mark.asyncio
 async def test_generic_exception_wrapped() -> None:
+    from collections.abc import AsyncIterator, Mapping
+
     class BoomTransport:
         async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
             raise ValueError("boom")
@@ -250,8 +246,8 @@ def test_status_error_mapping_function() -> None:
 
 
 @pytest.mark.asyncio
-async def test_defaults_applied_when_missing() -> None:
-    transport = CapturingTransport(chunks=["data: [DONE]\n"])
+async def test_defaults_applied_when_missing(capturing_transport) -> None:
+    transport = capturing_transport(chunks=["data: [DONE]\n"])
     client = OpenAIResponsesClient(
         transport,
         default_model="gpt-4.1-mini",
@@ -278,8 +274,8 @@ async def test_defaults_applied_when_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_streaming_tool_calls_round_trip() -> None:
-    transport = CapturingTransport(
+async def test_streaming_tool_calls_round_trip(capturing_transport) -> None:
+    transport = capturing_transport(
         chunks=[
             'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"run","arguments":""}}\n',
             'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"{","name":"run"}}\n',
@@ -300,8 +296,8 @@ async def test_streaming_tool_calls_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_early_does_not_error() -> None:
-    transport = CapturingTransport(
+async def test_cancel_early_does_not_error(capturing_transport) -> None:
+    transport = capturing_transport(
         chunks=[
             'data: {"type":"text_delta","delta":{"text":"hi"}}\n',
             'data: {"type":"text_delta","delta":{"text":"there"}}\n',
@@ -321,6 +317,8 @@ async def test_cancel_early_does_not_error() -> None:
 
 @pytest.mark.asyncio
 async def test_backpressure_with_slow_consumer() -> None:
+    from collections.abc import AsyncIterator, Mapping
+
     gate = asyncio.Event()
 
     class GatedTransport:

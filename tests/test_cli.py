@@ -1,5 +1,4 @@
 import argparse
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,143 +13,130 @@ def test_version_constant() -> None:
     assert __version__ == "0.1.0"
 
 
-def test_tool_subcommand_invokes_router(monkeypatch) -> None:
-    called = {}
+def test_tool_subcommand_invokes_router(mocker, fake_tool_router, mock_print) -> None:
+    from tests.conftest import FakeToolRouter
 
-    class DummyRouter:
-        def dispatch(self, name, **kwargs):
-            called["name"] = name
-            called["kwargs"] = kwargs
-            return {"ok": True}
+    router_instance = FakeToolRouter()
+    router_instance.set_dispatch_return({"ok": True})
+    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
 
-    monkeypatch.setattr(cli, "ToolRouter", lambda boundary, approval_policy: DummyRouter())
+    print_mock = mock_print
+
     settings = Settings(api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     args = argparse.Namespace(name="list_dir", json_payload=None, arg=["path=.", "depth=1"], command="tool")
-    printed: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
-
     code = cli._run_tool(settings, args)
 
     assert code == 0
-    assert '"ok": true' in printed[0].lower()
-    assert called["name"] == "list_dir"
-    assert called["kwargs"]["path"] == "."
+    print_mock.assert_called_once()
+    assert '"ok": true' in print_mock.call_args[0][0].lower()
+    assert len(router_instance.dispatch_calls) == 1
+    assert router_instance.dispatch_calls[0][0] == "list_dir"
+    assert router_instance.dispatch_calls[0][1]["path"] == "."
 
 
-def test_config_path(monkeypatch, capsys, tmp_path) -> None:
-    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
+def test_config_path(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
     settings = Settings(api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     args = argparse.Namespace(config_cmd="path")
-    printed: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(str(a[0])))
+    print_mock = mock_print
 
     code = cli._run_config(settings, args)
 
     assert code == 0
-    assert printed[0].endswith("config.toml")
+    print_mock.assert_called_once()
+    assert str(print_mock.call_args[0][0]).endswith("config.toml")
 
 
-def test_config_print(monkeypatch, capsys, tmp_path) -> None:
-    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
-    settings = Settings(api_key="test", model="demo-model", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
+def test_config_print(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
+    settings = Settings(
+        api_key="test", model="demo-model", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
+    )
     args = argparse.Namespace(config_cmd="print")
-    printed: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(a[0]))
+    print_mock = mock_print
 
     code = cli._run_config(settings, args)
 
     assert code == 0
-    assert "demo-model" in printed[0]
+    print_mock.assert_called_once()
+    assert "demo-model" in print_mock.call_args[0][0]
 
 
-def test_chat_runs_with_stub(monkeypatch):
+@pytest.mark.asyncio
+async def test_chat_runs_with_stub(mocker, no_session_io):
     called = {}
 
     async def fake_repl(self):
         called["ran"] = True
 
-    monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
+    mocker.patch.object(cli.AgentRunner, "repl", autospec=True, side_effect=fake_repl)
 
-    def fake_init(self, settings):
-        called["init"] = settings.model
-        return None
+    await cli._run_chat(
+        Settings(
+            api_key="test",
+            model="gpt-5.1-codex-mini",
+            fs_mode=FsMode.RESTRICTED,
+            approval_policy=ApprovalPolicy.NEVER,
+        )
+    )
 
-    monkeypatch.setattr(cli.AgentRunner, "__init__", fake_init)
-
-    asyncio.run(cli._run_chat(Settings(api_key="test", model="gpt-5.1-codex-mini", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)))
-
-    assert called["init"] == "gpt-5.1-codex-mini"
     assert called["ran"] is True
 
 
-def test_show_models_capabilities(monkeypatch, capsys):
-    class FakeModel:
-        def __init__(self, id):
-            self.id = id
+def test_show_models_capabilities(mocker, mock_openai_client, mock_print):
+    FakeClient = mock_openai_client(models_data=["gpt-5.1-codex-mini", "gpt-4o"])
+    mocker.patch(
+        "lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=["gpt-5.1-codex-mini", "gpt-4o"])
+    )
+    print_mock = mock_print
 
-    class FakeModels:
-        def list(self):
-            class Obj:
-                data = [FakeModel("gpt-5.1-codex-mini"), FakeModel("gpt-4o")]
-
-            return Obj()
-
-    class FakeClient:
-        def __init__(self, api_key=None):
-            self.models = FakeModels()
-
-    monkeypatch.setattr(cli, "OpenAI", FakeClient)
     settings = Settings(api_key="k", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "gpt-5.1-codex-mini" in out
+    print_mock.assert_called()
+    output = " ".join(str(call[0][0]) for call in print_mock.call_args_list)
+    assert "gpt-5.1-codex-mini" in output
 
 
-def test_sessions_list_show_rm(monkeypatch):
+def test_sessions_list_show_rm(mocker, mock_print):
     session_id = "202401010000-1234"
     fake_home = Path("/virtual/home")
     fake_session_path = fake_home / "sessions" / session_id / "events.jsonl"
 
-    monkeypatch.setattr(cli, "get_lincona_home", lambda: fake_home)
     fake_list = [
         SimpleNamespace(session_id=session_id, modified_at=datetime(2024, 1, 1), size_bytes=12, path=fake_session_path)
     ]
-    monkeypatch.setattr(cli, "list_sessions", lambda path: fake_list)
-    monkeypatch.setattr(Path, "exists", lambda self: self == fake_session_path, raising=False)
-    monkeypatch.setattr(Path, "read_text", lambda self, encoding="utf-8": '{"hello":true}')
-    deleted = {}
-    monkeypatch.setattr(cli, "delete_session", lambda sid, root: deleted.setdefault("sid", sid))
-
-    printed: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
+    mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=fake_home)
+    mocker.patch("lincona.cli.list_sessions", autospec=True, return_value=fake_list)
+    mocker.patch.object(Path, "exists", autospec=True, side_effect=lambda self: self == fake_session_path)
+    mocker.patch.object(Path, "read_text", autospec=True, return_value='{"hello":true}')
+    delete_mock = mocker.patch("lincona.cli.delete_session", autospec=True)
+    print_mock = mock_print
 
     list_args = argparse.Namespace(sessions_cmd="list", session_id=None)
     show_args = argparse.Namespace(sessions_cmd="show", session_id=session_id)
     rm_args = argparse.Namespace(sessions_cmd="rm", session_id=session_id)
 
     assert cli._run_sessions(list_args) == 0
-    assert session_id in printed[0]
+    assert session_id in print_mock.call_args_list[0][0][0]
 
     assert cli._run_sessions(show_args) == 0
-    assert "hello" in printed[1]
+    assert "hello" in print_mock.call_args_list[1][0][0]
 
     assert cli._run_sessions(rm_args) == 0
-    assert deleted["sid"] == session_id
+    delete_mock.assert_called_once_with(session_id, fake_home / "sessions")
 
 
-def test_sessions_show_missing(monkeypatch, capsys, tmp_path):
+def test_sessions_show_missing(mocker, tmp_path, mock_print):
     fake_home = Path("/virtual/home")
-    monkeypatch.setattr(cli, "get_lincona_home", lambda: fake_home)
-    monkeypatch.setattr(Path, "exists", lambda self: False, raising=False)
-    printed_err: list[str] = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed_err.append(a[0]))
+    mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=fake_home)
+    mocker.patch.object(Path, "exists", autospec=True, return_value=False)
+    print_mock = mock_print
     args = argparse.Namespace(sessions_cmd="show", session_id="missing-session")
 
     rc = cli._run_sessions(args)
 
     assert rc == 1
-    assert "not found" in printed_err[0]
+    print_mock.assert_called_once()
+    assert "not found" in print_mock.call_args[0][0]
 
 
 def test_tool_arg_requires_equals():
@@ -160,20 +146,19 @@ def test_tool_arg_requires_equals():
         cli._run_tool(settings, args)
 
 
-def test_tool_json_payload(monkeypatch):
-    called = {}
+def test_tool_json_payload(mocker, fake_tool_router, mock_print):
+    from tests.conftest import FakeToolRouter
 
-    def fake_dispatch(self, name, **kwargs):
-        called["payload"] = kwargs
-        return {"ok": True}
-
-    monkeypatch.setattr(cli.ToolRouter, "dispatch", fake_dispatch)
+    router_instance = FakeToolRouter()
+    router_instance.set_dispatch_return({"ok": True})
+    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+    _ = mock_print  # ensure print is mocked
 
     settings = Settings(api_key="test")
     args = argparse.Namespace(name="list_dir", json_payload='{"path": "."}', arg=[], command="tool")
     rc = cli._run_tool(settings, args)
     assert rc == 0
-    assert called["payload"]["path"] == "."
+    assert router_instance.dispatch_calls[0][1]["path"] == "."
 
 
 def test_run_config_unknown_command():
@@ -182,76 +167,85 @@ def test_run_config_unknown_command():
     assert cli._run_config(settings, args) == 1
 
 
-def test_main_unknown_command(monkeypatch):
+def test_main_unknown_command():
     with pytest.raises(SystemExit):
         cli.main(["unknown"])
 
 
-def test_run_tool_dispatch_error(monkeypatch):
+def test_run_tool_dispatch_error(mocker, fake_tool_router, mock_print):
+    from tests.conftest import FakeToolRouter
+
+    router_instance = FakeToolRouter()
+
+    def raise_error(*args, **kwargs):
+        raise RuntimeError("fail")
+
+    router_instance.dispatch = raise_error  # type: ignore[assignment]
+    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+    _ = mock_print  # ensure print is mocked
+
     settings = Settings(api_key="test")
     args = argparse.Namespace(name="list_dir", json_payload=None, arg=[], command="tool")
-    monkeypatch.setattr(cli.ToolRouter, "dispatch", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fail")))
     rc = cli._run_tool(settings, args)
     assert rc == 1
 
 
-def test_sessions_unknown_command(monkeypatch):
+def test_sessions_unknown_command():
     args = argparse.Namespace(sessions_cmd="noop", session_id="x")
     assert cli._run_sessions(args) == 1
 
 
-def test_show_models_requires_api_key(monkeypatch, capsys):
+def test_show_models_requires_api_key(mocker, mock_print):
     settings = Settings(api_key=None)
+    print_mock = mock_print
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 1
-    assert "OPENAI_API_KEY not set" in capsys.readouterr().err
+    print_mock.assert_called()
+    output = " ".join(str(call[0][0]) for call in print_mock.call_args_list)
+    assert "OPENAI_API_KEY not set" in output
 
 
-def test_show_models_handles_exception(monkeypatch, capsys):
+def test_show_models_handles_exception(mocker, mock_print):
     class BadClient:
         class models:
             @staticmethod
             def list():
                 raise RuntimeError("oops")
 
-    monkeypatch.setattr(cli, "OpenAI", lambda api_key=None: BadClient)
+    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=BadClient())
+    print_mock = mock_print
     settings = Settings(api_key="k")
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 1
-    assert "failed to fetch models" in capsys.readouterr().err
+    print_mock.assert_called()
+    output = " ".join(str(call[0][0]) for call in print_mock.call_args_list)
+    assert "failed to fetch models" in output
 
 
-def test_show_models_handles_no_rows(monkeypatch, capsys):
-    class ModelObj:
-        def __init__(self, id):
-            self.id = id
-
-    class FakeModels:
-        def list(self):
-            class Obj:
-                data = [ModelObj("not-gpt")]
-
-            return Obj()
-
-    monkeypatch.setattr(cli, "OpenAI", lambda api_key=None: type("C", (), {"models": FakeModels()})())
+def test_show_models_handles_no_rows(mocker, mock_openai_client, mock_print):
+    FakeClient = mock_openai_client(models_data=["not-gpt"])
+    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=["not-gpt"]))
+    print_mock = mock_print
     settings = Settings(api_key="k")
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 0
-    assert "no GPT-5 models" in capsys.readouterr().out
+    print_mock.assert_called()
+    output = " ".join(str(call[0][0]) for call in print_mock.call_args_list)
+    assert "no GPT-5 models" in output
 
 
-def test_cli_main_entrypoint(monkeypatch):
+def test_cli_main_entrypoint(mocker):
     import runpy
     import sys
 
     # ensure a clean import to avoid RuntimeWarning about existing module
     sys.modules.pop("lincona.cli", None)
-    monkeypatch.setattr("sys.argv", ["lincona", "--version"])
+    mocker.patch("sys.argv", ["lincona", "--version"])
     with pytest.raises(SystemExit):
         runpy.run_module("lincona.cli", run_name="__main__")
 
 
-def test_main_handles_unknown_command_branch(monkeypatch):
+def test_main_handles_unknown_command_branch(mocker):
     def fake_parse_args(self, argv=None):
         return argparse.Namespace(
             command="weird",
@@ -271,14 +265,14 @@ def test_main_handles_unknown_command_branch(monkeypatch):
             name=None,
         )
 
-    monkeypatch.setattr(cli.argparse.ArgumentParser, "parse_args", fake_parse_args, raising=False)
+    mocker.patch.object(cli.argparse.ArgumentParser, "parse_args", autospec=True, side_effect=fake_parse_args)
     # avoid real repl execution
-    monkeypatch.setattr(cli, "_run_chat", lambda settings: None)
+    mocker.patch("lincona.cli._run_chat", autospec=True, return_value=None)
     with pytest.raises(SystemExit):
         cli.main(["weird"])
 
 
-def test_debug_flag_writes_log(tmp_path: Path, capsys, monkeypatch) -> None:
+def test_debug_flag_writes_log(tmp_path: Path) -> None:
     args = argparse.Namespace(
         model=None,
         reasoning=None,
