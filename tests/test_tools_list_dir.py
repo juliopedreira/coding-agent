@@ -68,7 +68,7 @@ def test_missing_path_returns_empty(tmp_path: Path) -> None:
     assert entries == []
 
 
-def test_unrestricted_returns_absolute_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unrestricted_returns_absolute_paths(mocker) -> None:
     class Boundary:
         def sanitize_path(self, path):
             return Path("/tmp/root")
@@ -80,15 +80,17 @@ def test_unrestricted_returns_absolute_paths(monkeypatch: pytest.MonkeyPatch) ->
             return None
 
     child = Path("/tmp/root/child")
-    monkeypatch.setattr(Path, "iterdir", lambda self: [child] if self == Path("/tmp/root") else [])
-    monkeypatch.setattr(Path, "is_file", lambda self: True)
-    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    mocker.patch.object(
+        Path, "iterdir", autospec=True, side_effect=lambda self: [child] if self == Path("/tmp/root") else []
+    )
+    mocker.patch.object(Path, "is_file", autospec=True, return_value=True)
+    mocker.patch.object(Path, "is_symlink", autospec=True, return_value=False)
     entries = list_dir(Boundary(), path=".")
     assert entries == ["/tmp/root/child"]
 
 
-def test_list_dir_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
-    monkeypatch.setattr("lincona.tools.list_dir.list_dir", lambda boundary, **kwargs: ["x/"])
+def test_list_dir_tool_execute_and_end_event(mocker, restricted_boundary) -> None:
+    mocker.patch("lincona.tools.list_dir.list_dir", autospec=True, return_value=["x/"])
     tool = ListDirTool(restricted_boundary)
     output = tool.execute(ListDirInput(path=".", depth=1))
     assert output.entries == ["x/"]

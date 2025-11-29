@@ -30,7 +30,7 @@ def test_tool_subcommand_invokes_router(mock_tool_router_patch, mock_print) -> N
     assert mock_tool_router_patch.dispatch_calls[0][1]["path"] == "."
 
 
-def test_config_path(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
+def test_config_path(mock_lincona_home, mock_print) -> None:
     settings = Settings(api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     args = argparse.Namespace(config_cmd="path")
     print_mock = mock_print
@@ -42,7 +42,7 @@ def test_config_path(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
     assert str(print_mock.call_args[0][0]).endswith("config.toml")
 
 
-def test_config_print(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
+def test_config_print(mock_lincona_home, mock_print) -> None:
     settings = Settings(
         api_key="test", model="demo-model", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
     )
@@ -118,7 +118,7 @@ def test_sessions_list_show_rm(mocker, mock_print):
     delete_mock.assert_called_once_with(session_id, fake_home / "sessions")
 
 
-def test_sessions_show_missing(mocker, tmp_path, mock_print):
+def test_sessions_show_missing(mocker, mock_print):
     fake_home = Path("/virtual/home")
     mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=fake_home)
     mocker.patch.object(Path, "exists", autospec=True, return_value=False)
@@ -193,7 +193,7 @@ def test_show_models_handles_exception(mocker, bad_client_factory, mock_print):
     bad_client = bad_client_factory()
     mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=bad_client)
     print_mock = mock_print
-    settings = Settings(api_key="k")
+    settings = Settings(api_key="k", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 1
     print_mock.assert_called()
@@ -204,7 +204,7 @@ def test_show_models_handles_exception(mocker, bad_client_factory, mock_print):
 def test_show_models_handles_no_rows(mock_openai_patch, mock_print):
     mock_openai_patch(models_data=["not-gpt"])
     print_mock = mock_print
-    settings = Settings(api_key="k")
+    settings = Settings(api_key="k", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
     rc = cli._run_show_models_capabilities(settings)
     assert rc == 0
     print_mock.assert_called()

@@ -1,55 +1,46 @@
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from lincona.tools.shell import ShellInput, ShellOutput, ShellTool, run_shell, tool_registrations
 
 
-def test_shell_runs_command(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
+def test_shell_runs_command(mock_subprocess_run, restricted_boundary) -> None:
     called: dict[str, str] = {}
 
-    def fake_run(command, **kwargs):
+    def capture_run(command, **kwargs):
         called.update(command=command, cwd=kwargs.get("cwd", ""))
+        from types import SimpleNamespace
+
         return SimpleNamespace(stdout="hello\n", stderr="", returncode=0)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    mock_subprocess_run(side_effect=capture_run)
     result = run_shell(restricted_boundary, "echo hello", workdir=".")
 
     assert result["stdout"] == "hello\n"
     assert called["cwd"] == str(restricted_boundary.sanitize_workdir("."))
 
 
-def test_shell_timeout(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
-    def fake_run(*_, **__):
-        raise subprocess.TimeoutExpired(cmd="sleep", timeout=0.001)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+def test_shell_timeout(mock_subprocess_run, restricted_boundary) -> None:
+    mock_subprocess_run(timeout_exception=subprocess.TimeoutExpired(cmd="sleep", timeout=0.001))
     result = run_shell(restricted_boundary, "sleep 1", timeout_ms=10)
 
     assert result["timeout"] is True
     assert result["returncode"] is None
 
 
-def test_shell_truncation(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
+def test_shell_truncation(mock_subprocess_run, restricted_boundary) -> None:
     text = "x" * 20_000
-
-    def fake_run(*_, **__):
-        return SimpleNamespace(stdout=text, stderr="", returncode=0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    mock_subprocess_run(stdout=text, stderr="", returncode=0)
     result = run_shell(restricted_boundary, "ignored", max_bytes=1000, max_lines=5)
 
     assert result["stdout_truncated"] is True
     assert result["stdout"].endswith("[truncated]")
 
 
-def test_shell_non_zero_exit(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
-    def fake_run(*_, **__):
-        return SimpleNamespace(stdout="", stderr="err", returncode=7)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+def test_shell_non_zero_exit(mock_subprocess_run, restricted_boundary) -> None:
+    mock_subprocess_run(stdout="", stderr="err", returncode=7)
     result = run_shell(restricted_boundary, "bash -c 'echo err 1>&2; exit 7'")
 
     assert result["returncode"] == 7
@@ -66,10 +57,11 @@ def test_shell_input_casts_path_workdir():
     assert isinstance(validated.workdir, str)
 
 
-def test_shell_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary):
-    monkeypatch.setattr(
+def test_shell_tool_execute_and_end_event(mocker, restricted_boundary):
+    mocker.patch(
         "lincona.tools.shell.run_shell",
-        lambda boundary, **kwargs: {
+        autospec=True,
+        return_value={
             "stdout": "ok",
             "stderr": "",
             "returncode": 0,

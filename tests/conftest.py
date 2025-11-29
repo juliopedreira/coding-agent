@@ -307,6 +307,87 @@ def mock_lincona_home(mocker, tmp_path: Path):
 
 
 @pytest.fixture
+def mock_subprocess_run(mocker):
+    """Fixture factory for mocking subprocess.run with customizable behavior.
+
+    Returns a function that creates a mock for subprocess.run. The mock can be
+    customized by passing parameters or by modifying the returned mock object.
+    """
+
+    def _factory(
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        timeout_exception: Exception | None = None,
+        side_effect=None,
+    ):
+        """Create a mock for subprocess.run.
+
+        Args:
+            stdout: Standard output to return (if side_effect not provided)
+            stderr: Standard error to return (if side_effect not provided)
+            returncode: Exit code to return (if side_effect not provided)
+            timeout_exception: Exception to raise (e.g., subprocess.TimeoutExpired)
+            side_effect: Custom side effect function (takes precedence)
+        """
+        from types import SimpleNamespace
+
+        if side_effect is not None:
+            return mocker.patch("subprocess.run", autospec=True, side_effect=side_effect)
+
+        def fake_run(command, **kwargs):
+            if timeout_exception:
+                raise timeout_exception
+            return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+
+        return mocker.patch("subprocess.run", autospec=True, side_effect=fake_run)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_path_methods(mocker):
+    """Fixture factory for mocking Path methods with customizable behavior."""
+
+    def _factory(
+        exists: bool | None = None,
+        read_text: str | None = None,
+        iterdir: list[Path] | None = None,
+        is_file: bool | None = None,
+        is_symlink: bool | None = None,
+    ):
+        """Create mocks for common Path methods.
+
+        Args:
+            exists: Return value for Path.exists()
+            read_text: Return value for Path.read_text()
+            iterdir: Return value for Path.iterdir()
+            is_file: Return value for Path.is_file()
+            is_symlink: Return value for Path.is_symlink()
+        """
+        patches = {}
+
+        if exists is not None:
+            patches["exists"] = mocker.patch.object(Path, "exists", autospec=True, return_value=exists)
+
+        if read_text is not None:
+            patches["read_text"] = mocker.patch.object(Path, "read_text", autospec=True, return_value=read_text)
+
+        if iterdir is not None:
+            patches["iterdir"] = mocker.patch.object(Path, "iterdir", autospec=True, return_value=iterdir)
+
+        if is_file is not None:
+            patches["is_file"] = mocker.patch.object(Path, "is_file", autospec=True, return_value=is_file)
+
+        if is_symlink is not None:
+            patches["is_symlink"] = mocker.patch.object(Path, "is_symlink", autospec=True, return_value=is_symlink)
+
+        return patches
+
+    return _factory
+
+
+@pytest.fixture
 def mock_openai_client(mocker):
     """Fixture factory for mocking OpenAI client with fake models."""
 

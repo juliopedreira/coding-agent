@@ -206,7 +206,7 @@ def test_delete_session_handles_dir_entries(tmp_path: Path, monkeypatch: pytest.
     assert base.parent.exists()
 
 
-def test_delete_session_rmdir_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delete_session_rmdir_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker) -> None:
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
     base = session_path("sid2")
     base.parent.mkdir(parents=True, exist_ok=True)
@@ -218,7 +218,7 @@ def test_delete_session_rmdir_failure(tmp_path: Path, monkeypatch: pytest.Monkey
         called["rmdir"] = True
         raise OSError("busy")
 
-    monkeypatch.setattr(Path, "rmdir", fake_rmdir, raising=False)
+    mocker.patch.object(Path, "rmdir", autospec=True, side_effect=fake_rmdir)
     delete_session("sid2")
     assert called["rmdir"] is True
 
