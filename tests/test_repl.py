@@ -198,10 +198,12 @@ async def test_handle_stream_event_variants(settings, mocker, no_session_io, suc
 
 
 @pytest.mark.asyncio
-async def test_handle_stream_error_branch(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
+async def test_handle_stream_error_branch(
+    settings, mock_stdout_write, no_session_io, sequence_transport, dummy_client_factory, mocker
+):
     err = ErrorEvent(error=RuntimeError("boom"))
     runner = _stub_runner(settings, [err], mocker, no_session_io, sequence_transport, dummy_client_factory)
-    stdout_write_mock = mocker.patch("sys.stdout.write", autospec=True)
+    stdout_write_mock = mock_stdout_write()
     await runner.run_turn("err")
     stdout_write_mock.assert_called()
     # Error is written to stdout via _safe_write, check that "boom" was written

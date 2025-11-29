@@ -53,13 +53,13 @@ def test_config_print(mock_lincona_home, mock_print, settings_factory) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_runs_with_stub(mocker, no_session_io, restricted_settings):
+async def test_chat_runs_with_stub(mock_agent_runner_repl, no_session_io, restricted_settings):
     called = {}
 
     async def fake_repl(self):
         called["ran"] = True
 
-    mocker.patch.object(cli.AgentRunner, "repl", autospec=True, side_effect=fake_repl)
+    mock_agent_runner_repl(side_effect=fake_repl)
 
     await cli._run_chat(restricted_settings)
 
@@ -77,7 +77,7 @@ def test_show_models_capabilities(mock_openai_patch, mock_print, restricted_sett
     assert "gpt-5.1-codex-mini" in output
 
 
-def test_sessions_list_show_rm(mocker, mock_print, mock_cli_path_methods, mock_sessions_fixture):
+def test_sessions_list_show_rm(mock_delete_session, mock_print, mock_cli_path_methods, mock_sessions_fixture):
     session_id = "202401010000-1234"
     fake_home = Path("/virtual/home")
     fake_session_path = fake_home / "sessions" / session_id / "events.jsonl"
@@ -85,7 +85,7 @@ def test_sessions_list_show_rm(mocker, mock_print, mock_cli_path_methods, mock_s
     fake_list = [
         SimpleNamespace(session_id=session_id, modified_at=datetime(2024, 1, 1), size_bytes=12, path=fake_session_path)
     ]
-    delete_mock = mocker.patch("lincona.cli.delete_session", autospec=True)
+    delete_mock = mock_delete_session()
     mock_sessions_fixture(home=fake_home, sessions=fake_list)
     mock_cli_path_methods(
         exists=lambda self: self == fake_session_path,
@@ -178,9 +178,9 @@ def test_show_models_requires_api_key(mocker, mock_print, settings_factory):
     assert "OPENAI_API_KEY not set" in output
 
 
-def test_show_models_handles_exception(mocker, bad_client_factory, mock_print, restricted_settings):
+def test_show_models_handles_exception(mock_openai_client_patch, bad_client_factory, mock_print, restricted_settings):
     bad_client = bad_client_factory()
-    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=bad_client)
+    mock_openai_client_patch(client=bad_client)
     print_mock = mock_print
     rc = cli._run_show_models_capabilities(restricted_settings)
     assert rc == 1
@@ -199,18 +199,18 @@ def test_show_models_handles_no_rows(mock_openai_patch, mock_print, restricted_s
     assert "no GPT-5 models" in output
 
 
-def test_cli_main_entrypoint(mocker):
+def test_cli_main_entrypoint(mock_sys_argv):
     import runpy
     import sys
 
     # ensure a clean import to avoid RuntimeWarning about existing module
     sys.modules.pop("lincona.cli", None)
-    mocker.patch("sys.argv", ["lincona", "--version"])
+    mock_sys_argv(["lincona", "--version"])
     with pytest.raises(SystemExit):
         runpy.run_module("lincona.cli", run_name="__main__")
 
 
-def test_main_handles_unknown_command_branch(mocker):
+def test_main_handles_unknown_command_branch(mock_argparse_parse_args, mock_run_chat):
     def fake_parse_args(self, argv=None):
         return argparse.Namespace(
             command="weird",
@@ -230,9 +230,9 @@ def test_main_handles_unknown_command_branch(mocker):
             name=None,
         )
 
-    mocker.patch.object(cli.argparse.ArgumentParser, "parse_args", autospec=True, side_effect=fake_parse_args)
+    mock_argparse_parse_args(side_effect=fake_parse_args)
     # avoid real repl execution
-    mocker.patch("lincona.cli._run_chat", autospec=True, return_value=None)
+    mock_run_chat(return_value=None)
     with pytest.raises(SystemExit):
         cli.main(["weird"])
 

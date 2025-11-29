@@ -1251,3 +1251,195 @@ def mock_sessions_fixture(mocker):
                 mocker.patch("lincona.cli.delete_session", autospec=True)
 
     return _factory
+
+
+# ============================================================================
+# Additional CLI Mock Fixtures for Inline Mock Extraction
+# ============================================================================
+
+
+@pytest.fixture
+def mock_agent_runner_repl(mocker):
+    """Factory fixture for mocking AgentRunner.repl method.
+
+    Returns a function that creates a mock for cli.AgentRunner.repl with customizable side_effect.
+    """
+
+    def _factory(side_effect=None):
+        """Create a mock for AgentRunner.repl.
+
+        Args:
+            side_effect: Side effect function for the repl method (default: None)
+
+        Returns:
+            Mock object for AgentRunner.repl
+        """
+        import lincona.cli as cli_module
+
+        if side_effect is not None:
+            return mocker.patch.object(cli_module.AgentRunner, "repl", autospec=True, side_effect=side_effect)
+        return mocker.patch.object(cli_module.AgentRunner, "repl", autospec=True)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_delete_session(mocker):
+    """Factory fixture for mocking lincona.cli.delete_session function.
+
+    Returns a function that creates a mock for delete_session with customizable behavior.
+    """
+
+    def _factory(side_effect=None, return_value=None):
+        """Create a mock for delete_session.
+
+        Args:
+            side_effect: Side effect function for delete_session (default: None)
+            return_value: Return value for delete_session (default: None)
+
+        Returns:
+            Mock object for delete_session
+        """
+        if side_effect is not None:
+            return mocker.patch("lincona.cli.delete_session", autospec=True, side_effect=side_effect)
+        return mocker.patch("lincona.cli.delete_session", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_openai_client_patch(mocker, bad_client_factory):
+    """Factory fixture for mocking lincona.cli.OpenAI client.
+
+    Returns a function that creates a mock for OpenAI with customizable return value.
+    """
+
+    def _factory(client=None):
+        """Create a mock for OpenAI client.
+
+        Args:
+            client: Client instance to return (default: uses bad_client_factory if None)
+
+        Returns:
+            Mock object for OpenAI
+        """
+        if client is None:
+            client = bad_client_factory()
+        return mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=client)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_sys_argv(mocker):
+    """Factory fixture for mocking sys.argv.
+
+    Returns a function that creates a mock for sys.argv with customizable value.
+    """
+
+    def _factory(argv: list[str]):
+        """Create a mock for sys.argv.
+
+        Args:
+            argv: List of command-line arguments to set as sys.argv
+
+        Returns:
+            Mock object for sys.argv
+        """
+        return mocker.patch("sys.argv", argv)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_argparse_parse_args(mocker):
+    """Factory fixture for mocking argparse.ArgumentParser.parse_args.
+
+    Returns a function that creates a mock for parse_args with customizable side_effect.
+    """
+
+    def _factory(side_effect=None):
+        """Create a mock for ArgumentParser.parse_args.
+
+        Args:
+            side_effect: Side effect function for parse_args (default: None)
+
+        Returns:
+            Mock object for parse_args
+        """
+        import argparse
+
+        if side_effect is not None:
+            return mocker.patch.object(argparse.ArgumentParser, "parse_args", autospec=True, side_effect=side_effect)
+        return mocker.patch.object(argparse.ArgumentParser, "parse_args", autospec=True)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_run_chat(mocker):
+    """Factory fixture for mocking lincona.cli._run_chat function.
+
+    Returns a function that creates a mock for _run_chat with customizable return value or side_effect.
+    """
+
+    def _factory(return_value=None, side_effect=None):
+        """Create a mock for _run_chat.
+
+        Args:
+            return_value: Return value for _run_chat (default: None)
+            side_effect: Side effect function for _run_chat (default: None, takes precedence over return_value)
+
+        Returns:
+            Mock object for _run_chat
+        """
+        if side_effect is not None:
+            return mocker.patch("lincona.cli._run_chat", autospec=True, side_effect=side_effect)
+        return mocker.patch("lincona.cli._run_chat", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_list_dir(mocker):
+    """Factory fixture for mocking lincona.tools.list_dir.list_dir function.
+
+    Returns a function that creates a mock for list_dir with customizable return value.
+    """
+
+    def _factory(return_value=None):
+        """Create a mock for list_dir.
+
+        Args:
+            return_value: Return value for list_dir (default: None)
+
+        Returns:
+            Mock object for list_dir
+        """
+        return mocker.patch("lincona.tools.list_dir.list_dir", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_stdout_write(mocker):
+    """Factory fixture for mocking sys.stdout.write function.
+
+    Returns a function that creates a mock for sys.stdout.write with customizable behavior.
+    """
+
+    def _factory(side_effect=None, return_value=None):
+        """Create a mock for sys.stdout.write.
+
+        Args:
+            side_effect: Side effect function for stdout.write (default: None)
+            return_value: Return value for stdout.write (default: None)
+
+        Returns:
+            Mock object for sys.stdout.write
+        """
+        if side_effect is not None:
+            return mocker.patch("sys.stdout.write", autospec=True, side_effect=side_effect)
+        return mocker.patch("sys.stdout.write", autospec=True, return_value=return_value)
+
+    return _factory

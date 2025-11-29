@@ -90,8 +90,8 @@ def test_unrestricted_returns_absolute_paths(mock_path_methods) -> None:
     assert entries == ["/tmp/root/child"]
 
 
-def test_list_dir_tool_execute_and_end_event(mocker, restricted_boundary) -> None:
-    mocker.patch("lincona.tools.list_dir.list_dir", autospec=True, return_value=["x/"])
+def test_list_dir_tool_execute_and_end_event(mock_list_dir, restricted_boundary) -> None:
+    mock_list_dir(return_value=["x/"])
     tool = ListDirTool(restricted_boundary)
     output = tool.execute(ListDirInput(path=".", depth=1))
     assert output.entries == ["x/"]
