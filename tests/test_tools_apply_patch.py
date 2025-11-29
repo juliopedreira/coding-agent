@@ -99,13 +99,13 @@ def test_delete_file(tmp_path: Path) -> None:
     assert not target.exists()
 
 
-def test_delete_branch_appends_result(tmp_path: Path, mocker) -> None:
+def test_delete_branch_appends_result(tmp_path: Path, mock_parse_unified_diff) -> None:
     target = tmp_path / "del.txt"
     target.write_text("bye", encoding="utf-8")
     from lincona.tools.patch_parser import FilePatch
 
     fp = FilePatch(path=Path("del.txt"), hunks=[], delete=True)
-    mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[fp])
+    mock_parse_unified_diff(return_value=[fp])
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     results = apply_patch(boundary, "ignored")
     assert results and results[0].bytes_written == 0 and results[0].created is False
@@ -198,17 +198,17 @@ def test_freeform_requires_hunk_content(tmp_path: Path) -> None:
         apply_patch(boundary, patch, freeform=True)
 
 
-def test_skip_dev_null_deletion(mocker, tmp_path: Path) -> None:
+def test_skip_dev_null_deletion(mock_parse_unified_diff, tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     fp = SimpleNamespace(delete=True, path=Path("/dev/null"), hunks=[])
-    mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[fp])
+    mock_parse_unified_diff(return_value=[fp])
     assert apply_patch(boundary, "ignored") == []
 
 
-def test_cleanup_tempfile_on_replace_error(mocker, tmp_path: Path) -> None:
+def test_cleanup_tempfile_on_replace_error(mocker, mock_parse_unified_diff, mock_path_replace, tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     fp = SimpleNamespace(delete=False, path=Path("err.txt"), hunks=[])
-    mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[fp])
+    mock_parse_unified_diff(return_value=[fp])
 
     created: dict[str, Path] = {}
 
@@ -224,7 +224,7 @@ def test_cleanup_tempfile_on_replace_error(mocker, tmp_path: Path) -> None:
     def fake_replace(self, other):
         raise RuntimeError("boom")
 
-    mocker.patch.object(Path, "replace", autospec=True, side_effect=fake_replace)
+    mock_path_replace(side_effect=fake_replace)
 
     with pytest.raises(RuntimeError):
         apply_patch(boundary, "ignored")
@@ -232,10 +232,10 @@ def test_cleanup_tempfile_on_replace_error(mocker, tmp_path: Path) -> None:
     assert "path" in created and not created["path"].exists()
 
 
-def test_cleanup_tempfile_unlink_failure(mocker, tmp_path: Path) -> None:
+def test_cleanup_tempfile_unlink_failure(mocker, mock_parse_unified_diff, mock_path_replace, tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     fp = SimpleNamespace(delete=False, path=Path("err2.txt"), hunks=[])
-    mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[fp])
+    mock_parse_unified_diff(return_value=[fp])
 
     real_namedtemp = tempfile.NamedTemporaryFile
     created: dict[str, Path] = {}
@@ -309,7 +309,9 @@ def test_apply_hunks_success_and_additions() -> None:
     assert result == ["line1", "added"]
 
 
-def test_apply_patch_deletion_and_cleanup_and_helpers(mocker, tmp_path: Path) -> None:
+def test_apply_patch_deletion_and_cleanup_and_helpers(
+    mocker, mock_parse_unified_diff, mock_path_replace, tmp_path: Path
+) -> None:
     from lincona.tools.patch_parser import FilePatch, Hunk
 
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
@@ -317,7 +319,7 @@ def test_apply_patch_deletion_and_cleanup_and_helpers(mocker, tmp_path: Path) ->
     # deletion branch with existing file
     (tmp_path / "todel.txt").write_text("bye", encoding="utf-8")
     delete_patch = FilePatch(path=Path("todel.txt"), hunks=[], delete=True)
-    parse_mock = mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[delete_patch])
+    parse_mock = mock_parse_unified_diff(return_value=[delete_patch])
     res = apply_patch(boundary, "ignored")
     assert res[0].bytes_written == 0 and res[0].created is False
 
@@ -330,7 +332,7 @@ def test_apply_patch_deletion_and_cleanup_and_helpers(mocker, tmp_path: Path) ->
         raise RuntimeError("boom")
 
     parse_mock.return_value = [good_patch]
-    mocker.patch.object(Path, "replace", autospec=True, side_effect=fake_replace)
+    mock_path_replace(side_effect=fake_replace)
     with pytest.raises(RuntimeError):
         apply_patch(boundary, "ignored-again")
 
@@ -347,23 +349,18 @@ def test_apply_patch_deletion_and_cleanup_and_helpers(mocker, tmp_path: Path) ->
     assert apply_patch_mod._join_preserve_trailing(["line"], had_trailing=True).endswith("\n")
 
 
-def test_apply_patch_delete_branch_only(mocker, tmp_path: Path) -> None:
+def test_apply_patch_delete_branch_only(mock_parse_unified_diff, tmp_path: Path) -> None:
     from lincona.tools.patch_parser import FilePatch
 
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
     target = tmp_path / "delete_me.txt"
     target.write_text("bye", encoding="utf-8")
-    mocker.patch.object(
-        apply_patch_mod,
-        "parse_unified_diff",
-        autospec=True,
-        return_value=[FilePatch(path=Path("delete_me.txt"), hunks=[], delete=True)],
-    )
+    mock_parse_unified_diff(return_value=[FilePatch(path=Path("delete_me.txt"), hunks=[], delete=True)])
     res = apply_patch(boundary, "ignored")
     assert res[0].bytes_written == 0 and not target.exists()
 
 
-def test_apply_patch_cleanup_branch(mocker, tmp_path: Path) -> None:
+def test_apply_patch_cleanup_branch(mocker, mock_parse_unified_diff, mock_path_replace, tmp_path: Path) -> None:
     from lincona.tools.patch_parser import FilePatch, Hunk
 
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
@@ -375,8 +372,8 @@ def test_apply_patch_cleanup_branch(mocker, tmp_path: Path) -> None:
     def fake_replace(self, target):
         raise RuntimeError("boom2")
 
-    mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, return_value=[patch])
-    mocker.patch.object(Path, "replace", autospec=True, side_effect=fake_replace)
+    mock_parse_unified_diff(return_value=[patch])
+    mock_path_replace(side_effect=fake_replace)
     with pytest.raises(RuntimeError):
         apply_patch(boundary, "ignored")
 

@@ -838,6 +838,159 @@ def settings_factory(default_settings: Settings):
 
 
 # ============================================================================
+# ConversationRequest Fixtures
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def simple_conversation_request():
+    """Session-scoped fixture for a simple ConversationRequest (reusable for speed)."""
+    from lincona.openai_client.types import ConversationRequest, Message, MessageRole
+
+    return ConversationRequest(
+        messages=[Message(role=MessageRole.USER, content="hi")],
+        model="gpt-4.1",
+    )
+
+
+@pytest.fixture
+def conversation_request_factory():
+    """Factory fixture for creating customizable ConversationRequest instances."""
+
+    def _factory(**overrides):
+        from lincona.openai_client.types import ConversationRequest, Message, MessageRole
+
+        defaults = {
+            "messages": [Message(role=MessageRole.USER, content="hi")],
+            "model": "gpt-4.1",
+        }
+        defaults.update(overrides)
+        return ConversationRequest(**defaults)
+
+    return _factory
+
+
+# ============================================================================
+# Fake Transport Classes (Session-Scoped for Speed)
+# ============================================================================
+
+
+class FakeStreamCtx:
+    """Fake stream context for HTTP transport tests (session-scoped)."""
+
+    def __init__(self, status_code=200, headers=None, chunks=None):
+        self.status_code = status_code
+        self.headers = headers or {"x-request-id": "req-1"}
+        self._chunks = chunks or ['data: {"delta":"hi"}', "data: [DONE]"]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def aiter_lines(self):
+        for chunk in self._chunks:
+            yield chunk
+
+    def raise_for_status(self):
+        return None
+
+
+class FakeHttpClient:
+    """Fake HTTP client that records calls and returns FakeStreamCtx (session-scoped)."""
+
+    def __init__(self):
+        self.calls: list[dict[str, object]] = []
+        self._recorded: dict[str, Any] = {}
+
+    def stream(self, method, url, json=None, headers=None, timeout=None):
+        lowered = {k.lower(): v for k, v in (headers or {}).items()}
+        self._recorded.update(method=method, url=url, payload=json, headers=lowered)
+        return FakeStreamCtx()
+
+    async def aclose(self):
+        return None
+
+    @property
+    def recorded(self):
+        """Get recorded request data."""
+        return self._recorded
+
+
+@pytest.fixture(scope="session")
+def fake_stream_ctx_factory():
+    """Factory fixture for creating FakeStreamCtx instances (session-scoped for speed)."""
+    return FakeStreamCtx
+
+
+@pytest.fixture(scope="session")
+def fake_http_client_factory():
+    """Factory fixture for creating FakeHttpClient instances (session-scoped for speed)."""
+    return FakeHttpClient
+
+
+class FakeSDKResponses:
+    """Fake SDK responses client for OpenAISDKResponsesTransport tests."""
+
+    def __init__(self, evts):
+        self._events = evts
+
+    async def create(self, **kwargs):
+        async def gen():
+            for e in self._events:
+                yield e
+
+        return gen()
+
+
+class FakeSDKClient:
+    """Fake SDK client for OpenAISDKResponsesTransport tests."""
+
+    def __init__(self, evts):
+        self.responses = FakeSDKResponses(evts)
+
+
+@pytest.fixture(scope="session")
+def fake_sdk_client_factory():
+    """Factory fixture for creating FakeSDKClient instances (session-scoped for speed)."""
+    return FakeSDKClient
+
+
+# ============================================================================
+# Patch Pattern Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_parse_unified_diff(mocker):
+    """Factory fixture for mocking parse_unified_diff with common patterns."""
+
+    def _factory(return_value=None, side_effect=None):
+        import lincona.tools.apply_patch as apply_patch_mod
+
+        if side_effect is not None:
+            return mocker.patch.object(apply_patch_mod, "parse_unified_diff", autospec=True, side_effect=side_effect)
+        return mocker.patch.object(
+            apply_patch_mod, "parse_unified_diff", autospec=True, return_value=return_value or []
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def mock_path_replace(mocker):
+    """Factory fixture for mocking Path.replace with common patterns."""
+
+    def _factory(side_effect=None, return_value=None):
+        if side_effect is not None:
+            return mocker.patch.object(Path, "replace", autospec=True, side_effect=side_effect)
+        return mocker.patch.object(Path, "replace", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+# ============================================================================
 # Consolidated CLI Mock Fixtures
 # ============================================================================
 

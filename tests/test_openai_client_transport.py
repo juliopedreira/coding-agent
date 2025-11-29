@@ -1,5 +1,4 @@
 import json
-from typing import Any
 
 import httpx
 import pytest
@@ -8,40 +7,8 @@ from lincona.openai_client.transport import HttpResponsesTransport, OpenAISDKRes
 
 
 @pytest.mark.asyncio
-async def test_http_transport_streams_and_sets_headers() -> None:
-    recorded: dict[str, Any] = {}
-
-    class FakeStreamCtx:
-        def __init__(self):
-            self.status_code = 200
-            self.headers = {"x-request-id": "req-1"}
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return None
-
-        async def aiter_lines(self):
-            yield 'data: {"delta":"hi"}'
-            yield "data: [DONE]"
-
-        def raise_for_status(self):
-            return None
-
-    class FakeClient:
-        def __init__(self):
-            self.calls: list[dict[str, object]] = []
-
-        def stream(self, method, url, json=None, headers=None, timeout=None):
-            lowered = {k.lower(): v for k, v in (headers or {}).items()}
-            recorded.update(method=method, url=url, payload=json, headers=lowered)
-            return FakeStreamCtx()
-
-        async def aclose(self):
-            return None
-
-    client = FakeClient()
+async def test_http_transport_streams_and_sets_headers(fake_http_client_factory) -> None:
+    client = fake_http_client_factory()
     transport = HttpResponsesTransport(api_key="abc", client=client)
 
     chunks = []
@@ -50,6 +17,7 @@ async def test_http_transport_streams_and_sets_headers() -> None:
 
     await transport.aclose()
 
+    recorded = client.recorded
     assert recorded["method"] == "POST"
     assert recorded["url"] == "https://api.openai.com/v1/responses"
     assert recorded["payload"] == {"hello": "world"}
@@ -156,28 +124,13 @@ def test_map_openai_event_text_and_tools() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sdk_transport_streams_events() -> None:
+async def test_sdk_transport_streams_events(fake_sdk_client_factory) -> None:
     events = [
         type("E", (), {"type": "response.output_text.delta", "delta": "hi"}),
         type("E", (), {"type": "response.completed"}),
     ]
 
-    class FakeResponses:
-        def __init__(self, evts):  # pragma: no cover - trivial
-            self._events = evts
-
-        async def create(self, **kwargs):
-            async def gen():
-                for e in self._events:
-                    yield e
-
-            return gen()
-
-    class FakeClient:
-        def __init__(self, evts):
-            self.responses = FakeResponses(evts)
-
-    transport = OpenAISDKResponsesTransport(api_key="x", client=FakeClient(events))
+    transport = OpenAISDKResponsesTransport(api_key="x", client=fake_sdk_client_factory(events))
     chunks = []
     async for chunk in transport.stream_response({"hello": "world"}):
         chunks.append(chunk)

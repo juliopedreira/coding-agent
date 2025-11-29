@@ -59,7 +59,7 @@ async def test_builds_payload_and_streams_events(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_includes_freeform_tool(capturing_transport, success_transport) -> None:
+async def test_includes_freeform_tool(capturing_transport) -> None:
     transport = capturing_transport(chunks=["data: [DONE]\n"])
     client = OpenAIResponsesClient(transport)
 
@@ -99,10 +99,10 @@ async def test_tool_messages_are_filtered_from_payload(capturing_transport) -> N
 
 
 @pytest.mark.asyncio
-async def test_http_errors_are_mapped(mock_transport_error) -> None:
+async def test_http_errors_are_mapped(mock_transport_error, conversation_request_factory) -> None:
     transport = mock_transport_error(status_code=401)
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
 
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
@@ -110,20 +110,20 @@ async def test_http_errors_are_mapped(mock_transport_error) -> None:
 
     transport = mock_transport_error(status_code=429)
     client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(request)]
+    events = [event async for event in client.submit(conversation_request_factory())]
     assert isinstance(events[0].error, ApiRateLimitError)
 
     transport = mock_transport_error(status_code=500)
     client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(request)]
+    events = [event async for event in client.submit(conversation_request_factory())]
     assert isinstance(events[0].error, ApiServerError)
 
 
 @pytest.mark.asyncio
-async def test_timeout_and_request_error_mapping(error_transport_factory) -> None:
+async def test_timeout_and_request_error_mapping(error_transport_factory, conversation_request_factory) -> None:
     transport = error_transport_factory(httpx.ReadTimeout("timeout"))
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
 
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
@@ -131,34 +131,36 @@ async def test_timeout_and_request_error_mapping(error_transport_factory) -> Non
 
     transport = error_transport_factory(httpx.RequestError("boom"))
     client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(request)]
+    events = [event async for event in client.submit(conversation_request_factory())]
     assert isinstance(events[0].error, ApiClientError)
 
 
 @pytest.mark.asyncio
-async def test_streaming_parse_error_yields_error_event(bad_json_transport_factory) -> None:
+async def test_streaming_parse_error_yields_error_event(
+    bad_json_transport_factory, conversation_request_factory
+) -> None:
     transport = bad_json_transport_factory("data: {not-json")
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
     assert isinstance(events[0].error, StreamingParseError)
 
 
 @pytest.mark.asyncio
-async def test_api_error_passthrough(error_transport_factory) -> None:
+async def test_api_error_passthrough(error_transport_factory, conversation_request_factory) -> None:
     transport = error_transport_factory(ApiRateLimitError("slow"))
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiRateLimitError)
 
 
 @pytest.mark.asyncio
-async def test_generic_exception_wrapped(error_transport_factory) -> None:
+async def test_generic_exception_wrapped(error_transport_factory, conversation_request_factory) -> None:
     transport = error_transport_factory(ValueError("boom"))
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiError)
     assert str(events[0].error) == "unexpected error"
@@ -249,7 +251,7 @@ async def test_defaults_applied_when_missing(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_streaming_tool_calls_round_trip(capturing_transport) -> None:
+async def test_streaming_tool_calls_round_trip(capturing_transport, conversation_request_factory) -> None:
     transport = capturing_transport(
         chunks=[
             'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"run","arguments":""}}\n',
@@ -260,7 +262,7 @@ async def test_streaming_tool_calls_round_trip(capturing_transport) -> None:
         ]
     )
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
 
     events = [event async for event in client.submit(request)]
 
@@ -271,7 +273,7 @@ async def test_streaming_tool_calls_round_trip(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_early_does_not_error(capturing_transport) -> None:
+async def test_cancel_early_does_not_error(capturing_transport, conversation_request_factory) -> None:
     transport = capturing_transport(
         chunks=[
             'data: {"type":"text_delta","delta":{"text":"hi"}}\n',
@@ -280,7 +282,7 @@ async def test_cancel_early_does_not_error(capturing_transport) -> None:
         ]
     )
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
 
     received: list[str] = []
     async for event in client.submit(request):
@@ -291,7 +293,7 @@ async def test_cancel_early_does_not_error(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_backpressure_with_slow_consumer(gated_transport_factory) -> None:
+async def test_backpressure_with_slow_consumer(gated_transport_factory, conversation_request_factory) -> None:
     gate = asyncio.Event()
 
     transport = gated_transport_factory(
@@ -303,7 +305,7 @@ async def test_backpressure_with_slow_consumer(gated_transport_factory) -> None:
         ],
     )
     client = OpenAIResponsesClient(transport)
-    request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
+    request = conversation_request_factory()
 
     events_iter = client.submit(request)
 
