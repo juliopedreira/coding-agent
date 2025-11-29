@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any
 
 import httpx
 import pytest
@@ -122,38 +121,25 @@ async def test_http_errors_are_mapped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_timeout_and_request_error_mapping() -> None:
-    from collections.abc import AsyncIterator, Mapping
-
-    class TimeoutTransport:
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            raise httpx.ReadTimeout("timeout")
-
-    client = OpenAIResponsesClient(TimeoutTransport())
+async def test_timeout_and_request_error_mapping(error_transport_factory) -> None:
+    transport = error_transport_factory(httpx.ReadTimeout("timeout"))
+    client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
 
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
     assert isinstance(events[0].error, ApiTimeoutError)
 
-    class RequestErrorTransport:
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            raise httpx.RequestError("boom")
-
-    client = OpenAIResponsesClient(RequestErrorTransport())
+    transport = error_transport_factory(httpx.RequestError("boom"))
+    client = OpenAIResponsesClient(transport)
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiClientError)
 
 
 @pytest.mark.asyncio
-async def test_streaming_parse_error_yields_error_event() -> None:
-    from collections.abc import AsyncIterator, Mapping
-
-    class BadTransport:
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            yield "data: {not-json"
-
-    client = OpenAIResponsesClient(BadTransport())
+async def test_streaming_parse_error_yields_error_event(bad_json_transport_factory) -> None:
+    transport = bad_json_transport_factory("data: {not-json")
+    client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
@@ -161,28 +147,18 @@ async def test_streaming_parse_error_yields_error_event() -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_error_passthrough() -> None:
-    from collections.abc import AsyncIterator, Mapping
-
-    class ApiErrorTransport:
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            raise ApiRateLimitError("slow")
-
-    client = OpenAIResponsesClient(ApiErrorTransport())
+async def test_api_error_passthrough(error_transport_factory) -> None:
+    transport = error_transport_factory(ApiRateLimitError("slow"))
+    client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiRateLimitError)
 
 
 @pytest.mark.asyncio
-async def test_generic_exception_wrapped() -> None:
-    from collections.abc import AsyncIterator, Mapping
-
-    class BoomTransport:
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            raise ValueError("boom")
-
-    client = OpenAIResponsesClient(BoomTransport())
+async def test_generic_exception_wrapped(error_transport_factory) -> None:
+    transport = error_transport_factory(ValueError("boom"))
+    client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiError)
@@ -316,23 +292,17 @@ async def test_cancel_early_does_not_error(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_backpressure_with_slow_consumer() -> None:
-    from collections.abc import AsyncIterator, Mapping
-
+async def test_backpressure_with_slow_consumer(gated_transport_factory) -> None:
     gate = asyncio.Event()
 
-    class GatedTransport:
-        def __init__(self) -> None:
-            self.started = False
-
-        async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
-            self.started = True
-            yield 'data: {"type":"text_delta","delta":{"text":"one"}}\n'
-            await gate.wait()
-            yield 'data: {"type":"text_delta","delta":{"text":"two"}}\n'
-            yield "data: [DONE]\n"
-
-    transport = GatedTransport()
+    transport = gated_transport_factory(
+        gate,
+        [
+            'data: {"type":"text_delta","delta":{"text":"one"}}\n',
+            'data: {"type":"text_delta","delta":{"text":"two"}}\n',
+            "data: [DONE]\n",
+        ],
+    )
     client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
 

@@ -332,3 +332,168 @@ def mock_openai_client(mocker):
         return FakeClient
 
     return _client
+
+
+# ============================================================================
+# Error Transport Fixtures
+# ============================================================================
+
+
+class ErrorTransport:
+    """Transport that raises a specific error when stream_response is called."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+        raise self.error
+
+
+@pytest.fixture
+def error_transport_factory():
+    """Factory fixture for transports that raise specific errors (timeout, request error, API errors)."""
+
+    def _factory(error: Exception):
+        return ErrorTransport(error)
+
+    return _factory
+
+
+class BadJsonTransport:
+    """Transport that yields malformed JSON."""
+
+    def __init__(self, bad_chunk: str) -> None:
+        self.bad_chunk = bad_chunk
+
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+        yield self.bad_chunk
+
+
+@pytest.fixture
+def bad_json_transport_factory():
+    """Factory fixture for transports with malformed JSON."""
+
+    def _factory(bad_chunk: str = "data: {not-json"):
+        return BadJsonTransport(bad_chunk)
+
+    return _factory
+
+
+class GatedTransport:
+    """Transport for backpressure testing that gates on an asyncio.Event."""
+
+    def __init__(self, gate: Any, chunks: list[str]) -> None:
+        self.gate = gate
+        self.chunks = chunks
+        self.started = False
+
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str]:
+        self.started = True
+        yield self.chunks[0]
+        await self.gate.wait()
+        for chunk in self.chunks[1:]:
+            yield chunk
+
+
+@pytest.fixture
+def gated_transport_factory():
+    """Factory fixture for backpressure testing transports."""
+
+    def _factory(gate: Any, chunks: list[str]):
+        return GatedTransport(gate, chunks)
+
+    return _factory
+
+
+# ============================================================================
+# Client Fixtures
+# ============================================================================
+
+
+class DummyClient:
+    """Dummy client that yields predefined events."""
+
+    def __init__(self, events: list[Any]) -> None:
+        self._events = events
+        self._used = False
+
+    async def submit(self, request: Any) -> AsyncIterator[Any]:
+        if self._used:
+            from lincona.openai_client.types import MessageDone
+
+            yield MessageDone(finish_reason=None)
+            return
+        self._used = True
+        for event in self._events:
+            yield event
+
+
+@pytest.fixture
+def dummy_client_factory():
+    """Factory fixture for creating DummyClient instances with predefined events."""
+
+    def _factory(events: list[Any]):
+        return DummyClient(events)
+
+    return _factory
+
+
+class BadClient:
+    """Client that raises errors when methods are called."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or RuntimeError("oops")
+
+    class models:
+        @staticmethod
+        def list():
+            raise RuntimeError("oops")
+
+
+@pytest.fixture
+def bad_client_factory():
+    """Factory fixture for error-throwing clients."""
+
+    def _factory(error: Exception | None = None):
+        return BadClient(error)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_tool_router_factory(fake_tool_router):
+    """Factory fixture for creating mock ToolRouter instances."""
+
+    def _factory(dispatch_return: Any | None = None):
+        if dispatch_return is None:
+            dispatch_return = {"ok": True}
+        router_instance = fake_tool_router()
+        router_instance.set_dispatch_return(dispatch_return)
+        return router_instance
+
+    return _factory
+
+
+# ============================================================================
+# Common Patch Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_tool_router_patch(mocker, fake_tool_router):
+    """Fixture that patches ToolRouter globally and returns the mock instance."""
+
+    router_instance = fake_tool_router()
+    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+    return router_instance
+
+
+@pytest.fixture
+def mock_openai_patch(mocker, mock_openai_client):
+    """Fixture that patches OpenAI client globally."""
+
+    def _patch(models_data: list[str] | None = None):
+        FakeClient = mock_openai_client(models_data=models_data)
+        return mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=models_data))
+
+    return _patch

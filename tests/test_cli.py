@@ -13,12 +13,8 @@ def test_version_constant() -> None:
     assert __version__ == "0.1.0"
 
 
-def test_tool_subcommand_invokes_router(mocker, fake_tool_router, mock_print) -> None:
-    from tests.conftest import FakeToolRouter
-
-    router_instance = FakeToolRouter()
-    router_instance.set_dispatch_return({"ok": True})
-    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+def test_tool_subcommand_invokes_router(mock_tool_router_patch, mock_print) -> None:
+    mock_tool_router_patch.set_dispatch_return({"ok": True})
 
     print_mock = mock_print
 
@@ -29,9 +25,9 @@ def test_tool_subcommand_invokes_router(mocker, fake_tool_router, mock_print) ->
     assert code == 0
     print_mock.assert_called_once()
     assert '"ok": true' in print_mock.call_args[0][0].lower()
-    assert len(router_instance.dispatch_calls) == 1
-    assert router_instance.dispatch_calls[0][0] == "list_dir"
-    assert router_instance.dispatch_calls[0][1]["path"] == "."
+    assert len(mock_tool_router_patch.dispatch_calls) == 1
+    assert mock_tool_router_patch.dispatch_calls[0][0] == "list_dir"
+    assert mock_tool_router_patch.dispatch_calls[0][1]["path"] == "."
 
 
 def test_config_path(mocker, tmp_path, mock_lincona_home, mock_print) -> None:
@@ -81,11 +77,8 @@ async def test_chat_runs_with_stub(mocker, no_session_io):
     assert called["ran"] is True
 
 
-def test_show_models_capabilities(mocker, mock_openai_client, mock_print):
-    FakeClient = mock_openai_client(models_data=["gpt-5.1-codex-mini", "gpt-4o"])
-    mocker.patch(
-        "lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=["gpt-5.1-codex-mini", "gpt-4o"])
-    )
+def test_show_models_capabilities(mock_openai_patch, mock_print):
+    mock_openai_patch(models_data=["gpt-5.1-codex-mini", "gpt-4o"])
     print_mock = mock_print
 
     settings = Settings(api_key="k", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
@@ -146,19 +139,15 @@ def test_tool_arg_requires_equals():
         cli._run_tool(settings, args)
 
 
-def test_tool_json_payload(mocker, fake_tool_router, mock_print):
-    from tests.conftest import FakeToolRouter
-
-    router_instance = FakeToolRouter()
-    router_instance.set_dispatch_return({"ok": True})
-    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+def test_tool_json_payload(mock_tool_router_patch, mock_print):
+    mock_tool_router_patch.set_dispatch_return({"ok": True})
     _ = mock_print  # ensure print is mocked
 
     settings = Settings(api_key="test")
     args = argparse.Namespace(name="list_dir", json_payload='{"path": "."}', arg=[], command="tool")
     rc = cli._run_tool(settings, args)
     assert rc == 0
-    assert router_instance.dispatch_calls[0][1]["path"] == "."
+    assert mock_tool_router_patch.dispatch_calls[0][1]["path"] == "."
 
 
 def test_run_config_unknown_command():
@@ -172,16 +161,11 @@ def test_main_unknown_command():
         cli.main(["unknown"])
 
 
-def test_run_tool_dispatch_error(mocker, fake_tool_router, mock_print):
-    from tests.conftest import FakeToolRouter
-
-    router_instance = FakeToolRouter()
-
+def test_run_tool_dispatch_error(mock_tool_router_patch, mock_print):
     def raise_error(*args, **kwargs):
         raise RuntimeError("fail")
 
-    router_instance.dispatch = raise_error  # type: ignore[assignment]
-    mocker.patch("lincona.cli.ToolRouter", autospec=True, return_value=router_instance)
+    mock_tool_router_patch.dispatch = raise_error  # type: ignore[assignment]
     _ = mock_print  # ensure print is mocked
 
     settings = Settings(api_key="test")
@@ -205,14 +189,9 @@ def test_show_models_requires_api_key(mocker, mock_print):
     assert "OPENAI_API_KEY not set" in output
 
 
-def test_show_models_handles_exception(mocker, mock_print):
-    class BadClient:
-        class models:
-            @staticmethod
-            def list():
-                raise RuntimeError("oops")
-
-    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=BadClient())
+def test_show_models_handles_exception(mocker, bad_client_factory, mock_print):
+    bad_client = bad_client_factory()
+    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=bad_client)
     print_mock = mock_print
     settings = Settings(api_key="k")
     rc = cli._run_show_models_capabilities(settings)
@@ -222,9 +201,8 @@ def test_show_models_handles_exception(mocker, mock_print):
     assert "failed to fetch models" in output
 
 
-def test_show_models_handles_no_rows(mocker, mock_openai_client, mock_print):
-    FakeClient = mock_openai_client(models_data=["not-gpt"])
-    mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=["not-gpt"]))
+def test_show_models_handles_no_rows(mock_openai_patch, mock_print):
+    mock_openai_patch(models_data=["not-gpt"])
     print_mock = mock_print
     settings = Settings(api_key="k")
     rc = cli._run_show_models_capabilities(settings)

@@ -210,30 +210,16 @@ async def test_model_set_rejects_unsupported_verbosity(
     assert "verbosity 'low' not supported" in output
 
 
-class DummyClient:
-    def __init__(self, events):
-        self._events = events
-        self._used = False
-
-    async def submit(self, request):
-        if self._used:
-            yield MessageDone(finish_reason=None)
-            return
-        self._used = True
-        for event in self._events:
-            yield event
-
-
-def _stub_runner(settings, events, mocker, no_session_io, sequence_transport):
+def _stub_runner(settings, events, mocker, no_session_io, sequence_transport, dummy_client_factory):
     runner = AgentRunner(
         settings, transport=sequence_transport([['data: {"type":"response.done"}']]), boundary_root=Path(".")
     )
-    runner.client = DummyClient(events)
+    runner.client = dummy_client_factory(events)
     return runner
 
 
 @pytest.mark.asyncio
-async def test_handle_stream_event_variants(settings, mocker, no_session_io, sequence_transport):
+async def test_handle_stream_event_variants(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
     events = [
         TextDelta(text="chunk"),
         ToolCallStart(tool_call=ToolCallPayload(id="c1", name="t", arguments="")),
@@ -241,7 +227,7 @@ async def test_handle_stream_event_variants(settings, mocker, no_session_io, seq
         ToolCallEnd(tool_call=ToolCallPayload(id="c1", name="t", arguments="{}")),
         MessageDone(finish_reason=None),
     ]
-    runner = _stub_runner(settings, events, mocker, no_session_io, sequence_transport)
+    runner = _stub_runner(settings, events, mocker, no_session_io, sequence_transport, dummy_client_factory)
     runner.router = ToolRouter(FsBoundary(FsMode.UNRESTRICTED), ApprovalPolicy.NEVER)  # real router needed
     # ensure tool call execution returns non-empty output to exercise logging branch
     runner._execute_tools = lambda calls: [
@@ -253,9 +239,9 @@ async def test_handle_stream_event_variants(settings, mocker, no_session_io, seq
 
 
 @pytest.mark.asyncio
-async def test_handle_stream_error_branch(settings, mocker, no_session_io, sequence_transport):
+async def test_handle_stream_error_branch(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
     err = ErrorEvent(error=RuntimeError("boom"))
-    runner = _stub_runner(settings, [err], mocker, no_session_io, sequence_transport)
+    runner = _stub_runner(settings, [err], mocker, no_session_io, sequence_transport, dummy_client_factory)
     stdout_write_mock = mocker.patch("sys.stdout.write", autospec=True)
     await runner.run_turn("err")
     stdout_write_mock.assert_called()
@@ -264,8 +250,10 @@ async def test_handle_stream_error_branch(settings, mocker, no_session_io, seque
     assert "boom" in output or "RuntimeError" in output
 
 
-def test_execute_tools_dispatch_failure(settings, mocker, no_session_io, sequence_transport):
-    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport)
+def test_execute_tools_dispatch_failure(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
+    runner = _stub_runner(
+        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
+    )
 
     class FailingRouter:
         def dispatch(self, name: str, **kwargs):
@@ -278,8 +266,12 @@ def test_execute_tools_dispatch_failure(settings, mocker, no_session_io, sequenc
 
 
 @pytest.mark.asyncio
-async def test_slash_usage_and_invalid_reasoning(settings, mocker, no_session_io, sequence_transport, mock_print):
-    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport)
+async def test_slash_usage_and_invalid_reasoning(
+    settings, mocker, no_session_io, sequence_transport, mock_print, dummy_client_factory
+):
+    runner = _stub_runner(
+        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
+    )
     print_mock = mock_print
     await runner._handle_slash("/model:set")
     await runner._handle_slash("/reasoning nope")
@@ -288,18 +280,26 @@ async def test_slash_usage_and_invalid_reasoning(settings, mocker, no_session_io
     assert "reasoning must be one of" in output
 
 
-def test_print_model_list_text_path(settings, mocker, no_session_io, sequence_transport, mock_print):
-    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport)
+def test_print_model_list_text_path(
+    settings, mocker, no_session_io, sequence_transport, mock_print, dummy_client_factory
+):
+    runner = _stub_runner(
+        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
+    )
     print_mock = mock_print
     runner._print_model_list()
     output = " ".join(str(call[0][0]) for call in print_mock.call_args_list if call[0])
     assert "Available models" in output
 
 
-def test_set_model_missing_defaults(mocker, settings, no_session_io, sequence_transport, mock_print):
+def test_set_model_missing_defaults(
+    mocker, settings, no_session_io, sequence_transport, mock_print, dummy_client_factory
+):
     caps = ModelCapabilities(reasoning_effort=(), default_reasoning=None, verbosity=(), default_verbosity=None)
     settings = Settings(**{**settings.model_dump(), "models": {"empty": caps}, "model": "empty"})
-    runner = _stub_runner(settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport)
+    runner = _stub_runner(
+        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
+    )
     print_mock = mock_print
     runner._set_model("empty")
     output = " ".join(str(call[0][0]) for call in print_mock.call_args_list if call[0])
