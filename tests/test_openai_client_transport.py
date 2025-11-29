@@ -4,12 +4,7 @@ from typing import Any
 import httpx
 import pytest
 
-from lincona.openai_client.transport import (
-    HttpResponsesTransport,
-    MockResponsesTransport,
-    OpenAISDKResponsesTransport,
-    _map_openai_event,
-)
+from lincona.openai_client.transport import HttpResponsesTransport, OpenAISDKResponsesTransport, _map_openai_event
 
 
 @pytest.mark.asyncio
@@ -80,8 +75,8 @@ async def test_http_transport_raises_on_http_errors(error_response_handler, mock
 
 
 @pytest.mark.asyncio
-async def test_mock_transport_yields_chunks() -> None:
-    transport = MockResponsesTransport(["one", b"two"])
+async def test_mock_transport_yields_chunks(mock_responses_transport) -> None:
+    transport = mock_responses_transport(chunks=["one", b"two"])
 
     collected = []
     async for chunk in transport.stream_response({"ignored": True}):
@@ -91,8 +86,8 @@ async def test_mock_transport_yields_chunks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mock_transport_errors() -> None:
-    transport = MockResponsesTransport([], status_code=500)
+async def test_mock_transport_errors(mock_transport_error) -> None:
+    transport = mock_transport_error(status_code=500)
 
     with pytest.raises(httpx.HTTPStatusError):
         async for _ in transport.stream_response({}):
@@ -218,9 +213,9 @@ async def test_http_transport_custom_headers_and_logger(mock_http_handler, mock_
 
 
 @pytest.mark.asyncio
-async def test_mock_transport_logger_called_on_success():
+async def test_mock_transport_logger_called_on_success(mock_responses_transport):
     events = []
-    transport = MockResponsesTransport(["x"], logger=lambda e, d: events.append((e, d)))
+    transport = mock_responses_transport(chunks=["x"], logger=lambda e, d: events.append((e, d)))
     chunks = []
     async for c in transport.stream_response({}):
         chunks.append(c)

@@ -7,7 +7,6 @@ import lincona.config
 import lincona.openai_client.client as client_module
 from lincona.config import ReasoningEffort
 from lincona.openai_client.client import OpenAIResponsesClient, _map_status_error
-from lincona.openai_client.transport import MockResponsesTransport
 from lincona.openai_client.types import (
     ApiAuthError,
     ApiClientError,
@@ -100,8 +99,8 @@ async def test_tool_messages_are_filtered_from_payload(capturing_transport) -> N
 
 
 @pytest.mark.asyncio
-async def test_http_errors_are_mapped() -> None:
-    transport = MockResponsesTransport([], status_code=401)
+async def test_http_errors_are_mapped(mock_transport_error) -> None:
+    transport = mock_transport_error(status_code=401)
     client = OpenAIResponsesClient(transport)
     request = ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model="gpt-4.1")
 
@@ -109,12 +108,12 @@ async def test_http_errors_are_mapped() -> None:
     assert isinstance(events[0], ErrorEvent)
     assert isinstance(events[0].error, ApiAuthError)
 
-    transport = MockResponsesTransport([], status_code=429)
+    transport = mock_transport_error(status_code=429)
     client = OpenAIResponsesClient(transport)
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiRateLimitError)
 
-    transport = MockResponsesTransport([], status_code=500)
+    transport = mock_transport_error(status_code=500)
     client = OpenAIResponsesClient(transport)
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0].error, ApiServerError)
@@ -165,8 +164,8 @@ async def test_generic_exception_wrapped(error_transport_factory) -> None:
     assert str(events[0].error) == "unexpected error"
 
 
-def test_build_payload_requires_model() -> None:
-    client = OpenAIResponsesClient(MockResponsesTransport([]))
+def test_build_payload_requires_model(mock_responses_transport) -> None:
+    client = OpenAIResponsesClient(mock_responses_transport(chunks=[]))
     with pytest.raises(ApiClientError):
         client._build_payload(ConversationRequest(messages=[Message(role=MessageRole.USER, content="hi")], model=None))
 
@@ -179,8 +178,8 @@ def test_tool_to_dict_unsupported_type() -> None:
         client_module._tool_to_dict(Unknown())  # type: ignore[arg-type]
 
 
-def test_payload_includes_verbosity() -> None:
-    transport = MockResponsesTransport([])
+def test_payload_includes_verbosity(mock_responses_transport) -> None:
+    transport = mock_responses_transport(chunks=[])
     client = OpenAIResponsesClient(transport)
     request = ConversationRequest(
         messages=[Message(role=MessageRole.USER, content="hi")],

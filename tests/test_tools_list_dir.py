@@ -68,7 +68,7 @@ def test_missing_path_returns_empty(tmp_path: Path) -> None:
     assert entries == []
 
 
-def test_unrestricted_returns_absolute_paths(mocker) -> None:
+def test_unrestricted_returns_absolute_paths(mock_path_methods) -> None:
     class Boundary:
         def sanitize_path(self, path):
             return Path("/tmp/root")
@@ -80,11 +80,12 @@ def test_unrestricted_returns_absolute_paths(mocker) -> None:
             return None
 
     child = Path("/tmp/root/child")
-    mocker.patch.object(
-        Path, "iterdir", autospec=True, side_effect=lambda self: [child] if self == Path("/tmp/root") else []
+    root_path = Path("/tmp/root")
+    mock_path_methods(
+        side_effect_iterdir=lambda self: [child] if self == root_path else [],
+        is_file=True,
+        is_symlink=False,
     )
-    mocker.patch.object(Path, "is_file", autospec=True, return_value=True)
-    mocker.patch.object(Path, "is_symlink", autospec=True, return_value=False)
     entries = list_dir(Boundary(), path=".")
     assert entries == ["/tmp/root/child"]
 

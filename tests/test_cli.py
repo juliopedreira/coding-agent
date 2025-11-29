@@ -89,7 +89,7 @@ def test_show_models_capabilities(mock_openai_patch, mock_print):
     assert "gpt-5.1-codex-mini" in output
 
 
-def test_sessions_list_show_rm(mocker, mock_print):
+def test_sessions_list_show_rm(mocker, mock_print, mock_cli_path_methods):
     session_id = "202401010000-1234"
     fake_home = Path("/virtual/home")
     fake_session_path = fake_home / "sessions" / session_id / "events.jsonl"
@@ -99,8 +99,10 @@ def test_sessions_list_show_rm(mocker, mock_print):
     ]
     mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=fake_home)
     mocker.patch("lincona.cli.list_sessions", autospec=True, return_value=fake_list)
-    mocker.patch.object(Path, "exists", autospec=True, side_effect=lambda self: self == fake_session_path)
-    mocker.patch.object(Path, "read_text", autospec=True, return_value='{"hello":true}')
+    mock_cli_path_methods(
+        exists=lambda self: self == fake_session_path,
+        read_text='{"hello":true}',
+    )
     delete_mock = mocker.patch("lincona.cli.delete_session", autospec=True)
     print_mock = mock_print
 
@@ -118,10 +120,10 @@ def test_sessions_list_show_rm(mocker, mock_print):
     delete_mock.assert_called_once_with(session_id, fake_home / "sessions")
 
 
-def test_sessions_show_missing(mocker, mock_print):
+def test_sessions_show_missing(mocker, mock_print, mock_cli_path_methods):
     fake_home = Path("/virtual/home")
     mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=fake_home)
-    mocker.patch.object(Path, "exists", autospec=True, return_value=False)
+    mock_cli_path_methods(exists=False)
     print_mock = mock_print
     args = argparse.Namespace(sessions_cmd="show", session_id="missing-session")
 

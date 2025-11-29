@@ -145,21 +145,21 @@ class FakeToolRouter:
         self._dispatch_return = value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def fake_jsonl_writer() -> type[FakeJsonlEventWriter]:
-    """Provide FakeJsonlEventWriter class for use in patches."""
+    """Provide FakeJsonlEventWriter class for use in patches (session-scoped for speed)."""
     return FakeJsonlEventWriter
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def fake_logger() -> type[FakeLogger]:
-    """Provide FakeLogger class for use in patches."""
+    """Provide FakeLogger class for use in patches (session-scoped for speed)."""
     return FakeLogger
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def fake_tool_router() -> type[FakeToolRouter]:
-    """Provide FakeToolRouter class for use in patches."""
+    """Provide FakeToolRouter class for use in patches (session-scoped for speed)."""
     return FakeToolRouter
 
 
@@ -215,15 +215,15 @@ class CapturingTransport:
             yield chunk
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def sequence_transport():
-    """Factory fixture for SequenceTransport that yields predefined chunk sequences."""
+    """Factory fixture for SequenceTransport that yields predefined chunk sequences (session-scoped for speed)."""
     return SequenceTransport
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def capturing_transport():
-    """Factory fixture for CapturingTransport that captures payloads and yields chunks."""
+    """Factory fixture for CapturingTransport that captures payloads and yields chunks (session-scoped for speed)."""
     return CapturingTransport
 
 
@@ -355,6 +355,9 @@ def mock_path_methods(mocker):
         iterdir: list[Path] | None = None,
         is_file: bool | None = None,
         is_symlink: bool | None = None,
+        side_effect_exists: Any | None = None,
+        side_effect_read_text: Any | None = None,
+        side_effect_iterdir: Any | None = None,
     ):
         """Create mocks for common Path methods.
 
@@ -364,17 +367,35 @@ def mock_path_methods(mocker):
             iterdir: Return value for Path.iterdir()
             is_file: Return value for Path.is_file()
             is_symlink: Return value for Path.is_symlink()
+            side_effect_exists: Side effect function for Path.exists()
+            side_effect_read_text: Side effect function for Path.read_text()
+            side_effect_iterdir: Side effect function for Path.iterdir()
         """
         patches = {}
 
-        if exists is not None:
-            patches["exists"] = mocker.patch.object(Path, "exists", autospec=True, return_value=exists)
+        if exists is not None or side_effect_exists is not None:
+            kwargs = {"autospec": True}
+            if side_effect_exists is not None:
+                kwargs["side_effect"] = side_effect_exists
+            else:
+                kwargs["return_value"] = exists
+            patches["exists"] = mocker.patch.object(Path, "exists", **kwargs)
 
-        if read_text is not None:
-            patches["read_text"] = mocker.patch.object(Path, "read_text", autospec=True, return_value=read_text)
+        if read_text is not None or side_effect_read_text is not None:
+            kwargs = {"autospec": True}
+            if side_effect_read_text is not None:
+                kwargs["side_effect"] = side_effect_read_text
+            else:
+                kwargs["return_value"] = read_text
+            patches["read_text"] = mocker.patch.object(Path, "read_text", **kwargs)
 
-        if iterdir is not None:
-            patches["iterdir"] = mocker.patch.object(Path, "iterdir", autospec=True, return_value=iterdir)
+        if iterdir is not None or side_effect_iterdir is not None:
+            kwargs = {"autospec": True}
+            if side_effect_iterdir is not None:
+                kwargs["side_effect"] = side_effect_iterdir
+            else:
+                kwargs["return_value"] = iterdir
+            patches["iterdir"] = mocker.patch.object(Path, "iterdir", **kwargs)
 
         if is_file is not None:
             patches["is_file"] = mocker.patch.object(Path, "is_file", autospec=True, return_value=is_file)
@@ -430,9 +451,12 @@ class ErrorTransport:
         raise self.error
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def error_transport_factory():
-    """Factory fixture for transports that raise specific errors (timeout, request error, API errors)."""
+    """Factory fixture for transports that raise specific errors (timeout, request error, API errors).
+
+    Session-scoped for speed.
+    """
 
     def _factory(error: Exception):
         return ErrorTransport(error)
@@ -450,9 +474,9 @@ class BadJsonTransport:
         yield self.bad_chunk
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def bad_json_transport_factory():
-    """Factory fixture for transports with malformed JSON."""
+    """Factory fixture for transports with malformed JSON (session-scoped for speed)."""
 
     def _factory(bad_chunk: str = "data: {not-json"):
         return BadJsonTransport(bad_chunk)
@@ -476,9 +500,9 @@ class GatedTransport:
             yield chunk
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def gated_transport_factory():
-    """Factory fixture for backpressure testing transports."""
+    """Factory fixture for backpressure testing transports (session-scoped for speed)."""
 
     def _factory(gate: Any, chunks: list[str]):
         return GatedTransport(gate, chunks)
@@ -509,9 +533,9 @@ class DummyClient:
             yield event
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def dummy_client_factory():
-    """Factory fixture for creating DummyClient instances with predefined events."""
+    """Factory fixture for creating DummyClient instances with predefined events (session-scoped for speed)."""
 
     def _factory(events: list[Any]):
         return DummyClient(events)
@@ -531,9 +555,9 @@ class BadClient:
             raise RuntimeError("oops")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def bad_client_factory():
-    """Factory fixture for error-throwing clients."""
+    """Factory fixture for error-throwing clients (session-scoped for speed)."""
 
     def _factory(error: Exception | None = None):
         return BadClient(error)
@@ -578,3 +602,167 @@ def mock_openai_patch(mocker, mock_openai_client):
         return mocker.patch("lincona.cli.OpenAI", autospec=True, return_value=FakeClient(models_data=models_data))
 
     return _patch
+
+
+# ============================================================================
+# Enhanced Transport Fixtures for MockResponsesTransport
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def mock_responses_transport():
+    """Factory fixture for creating MockResponsesTransport instances with common configurations.
+
+    Session-scoped for speed.
+    """
+
+    def _factory(
+        chunks: list[str | bytes] | None = None,
+        status_code: int | None = None,
+        logger: Any | None = None,
+    ):
+        """Create a MockResponsesTransport instance.
+
+        Args:
+            chunks: List of chunks to yield (default: ["data: [DONE]\n"])
+            status_code: HTTP status code to raise (default: None, no error)
+            logger: Optional logger function
+        """
+        from lincona.openai_client.transport import MockResponsesTransport
+
+        if chunks is None:
+            chunks = ["data: [DONE]\n"]
+        if status_code is not None:
+            return MockResponsesTransport(chunks, status_code=status_code, logger=logger)
+        else:
+            return MockResponsesTransport(chunks, logger=logger)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_transport_success(mock_responses_transport):
+    """Fixture factory for successful transport responses."""
+
+    def _factory(chunks: list[str] | None = None):
+        if chunks is None:
+            chunks = ["data: [DONE]\n"]
+        return mock_responses_transport(chunks=chunks)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_transport_error(mock_responses_transport):
+    """Fixture factory for error transport responses."""
+
+    def _factory(status_code: int, chunks: list[str] | None = None):
+        return mock_responses_transport(chunks=chunks or [], status_code=status_code)
+
+    return _factory
+
+
+# ============================================================================
+# Common Path Mock Presets
+# ============================================================================
+
+
+@pytest.fixture
+def mock_path_exists_file(mock_path_methods):
+    """Fixture that mocks Path.exists() to return True and Path.is_file() to return True."""
+
+    def _factory(path: Path | None = None):
+        if path is not None:
+            patches = mock_path_methods(
+                side_effect_exists=lambda self: True if self == path else Path.exists(self),
+                is_file=True,
+            )
+        else:
+            patches = mock_path_methods(exists=True, is_file=True)
+        return patches
+
+    return _factory
+
+
+@pytest.fixture
+def mock_path_read_text(mock_path_methods):
+    """Fixture that mocks Path.read_text() with a given value."""
+
+    def _factory(text: str, path: Path | None = None):
+        if path is not None:
+            patches = mock_path_methods(
+                side_effect_read_text=lambda self: text if self == path else Path.read_text(self)
+            )
+        else:
+            patches = mock_path_methods(read_text=text)
+        return patches
+
+    return _factory
+
+
+@pytest.fixture
+def mock_path_iterdir(mock_path_methods):
+    """Fixture that mocks Path.iterdir() with a given list of paths."""
+
+    def _factory(paths: list[Path], path: Path | None = None):
+        if path is not None:
+            patches = mock_path_methods(
+                side_effect_iterdir=lambda self: iter(paths) if self == path else Path.iterdir(self)
+            )
+        else:
+            patches = mock_path_methods(iterdir=paths)
+        return patches
+
+    return _factory
+
+
+# ============================================================================
+# Consolidated CLI Mock Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_cli_session_mocks(mocker, fake_jsonl_writer, fake_logger):
+    """Fixture that patches common CLI session-related mocks in one go."""
+
+    mocker.patch(
+        "lincona.cli.get_lincona_home",
+        autospec=True,
+        return_value=Path("/virtual/home"),
+    )
+    mocker.patch(
+        "lincona.sessions.JsonlEventWriter",
+        autospec=True,
+        side_effect=lambda path, fsync_every=None: fake_jsonl_writer(path, fsync_every=fsync_every),
+    )
+    mocker.patch(
+        "lincona.logging.configure_session_logger",
+        autospec=True,
+        side_effect=lambda *a, **k: fake_logger("test"),
+    )
+
+
+@pytest.fixture
+def mock_cli_path_methods(mocker):
+    """Fixture that patches common Path methods used in CLI tests."""
+
+    def _factory(
+        exists: bool | Any = True,
+        read_text: str | Any = '{"hello":true}',
+    ):
+        """Create mocks for Path.exists() and Path.read_text().
+
+        Args:
+            exists: Return value or side_effect for Path.exists()
+            read_text: Return value or side_effect for Path.read_text()
+        """
+        if callable(exists):
+            mocker.patch.object(Path, "exists", autospec=True, side_effect=exists)
+        else:
+            mocker.patch.object(Path, "exists", autospec=True, return_value=exists)
+        if callable(read_text):
+            mocker.patch.object(Path, "read_text", autospec=True, side_effect=read_text)
+        else:
+            mocker.patch.object(Path, "read_text", autospec=True, return_value=read_text)
+
+    return _factory
