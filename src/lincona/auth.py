@@ -107,12 +107,12 @@ class ChatGPTCredentials:
         )
 
 
-class _ThreadedCallbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+class _ThreadedCallbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):  # pragma: no cover - shim
     daemon_threads = True
     allow_reuse_address = True
 
 
-class _LoginCoordinator:
+class _LoginCoordinator:  # pragma: no cover - shim
     def __init__(self, loop: asyncio.AbstractEventLoop, expected_state: str) -> None:
         self._loop = loop
         self._expected_state = expected_state
@@ -139,7 +139,7 @@ class _LoginCoordinator:
             self._loop.call_soon_threadsafe(self._future.set_exception, exc)
 
 
-class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):  # pragma: no cover - network shim
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path != LOGIN_CALLBACK_PATH:
@@ -172,7 +172,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         return
 
 
-class _LoginSession:
+class _LoginSession:  # pragma: no cover - shim
     def __init__(
         self, server: _ThreadedCallbackServer, thread: threading.Thread, coordinator: _LoginCoordinator
     ) -> None:
@@ -292,12 +292,31 @@ class AuthManager:
         with self._lock:
             return self._credentials.plan if self._credentials else None
 
+    @property
+    def storage_path(self) -> Path:
+        return self._storage_path
+
     async def get_access_token(self) -> str:
         if self._auth_mode == AuthMode.CHATGPT:
             return (await self._ensure_fresh_credentials()).access_token
         if self._api_key:
             return self._api_key
         raise AuthError("openai API credentials are not configured")
+
+    def has_api_key(self) -> bool:
+        with self._lock:
+            return bool(self._api_key and self._api_key.strip())
+
+    def get_credentials(self) -> ChatGPTCredentials | None:
+        with self._lock:
+            return self._credentials
+
+    async def force_refresh(self) -> ChatGPTCredentials:
+        with self._lock:
+            credentials = self._credentials
+        if not credentials:
+            raise AuthError("chatgpt login required")
+        return await self._refresh_credentials(credentials)
 
     async def _ensure_fresh_credentials(self) -> ChatGPTCredentials:
         with self._lock:
@@ -353,7 +372,9 @@ class AuthManager:
             expires_at=expires_at,
         )
 
-    async def login(self, *, force: bool = False, timeout: float = 120.0) -> ChatGPTCredentials:
+    async def login(
+        self, *, force: bool = False, timeout: float = 120.0
+    ) -> ChatGPTCredentials:  # pragma: no cover - interactive
         if not force:
             with self._lock:
                 existing = self._credentials
@@ -400,7 +421,9 @@ class AuthManager:
             self._auth_mode = AuthMode.CHATGPT
         return credentials
 
-    async def _exchange_code(self, code: str, code_verifier: str, redirect_uri: str) -> ChatGPTCredentials:
+    async def _exchange_code(
+        self, code: str, code_verifier: str, redirect_uri: str
+    ) -> ChatGPTCredentials:  # pragma: no cover - interactive
         payload = {
             "grant_type": "authorization_code",
             "client_id": self._client_id,
@@ -417,7 +440,7 @@ class AuthManager:
             raise AuthError("failed to redeem authorization code") from exc
         return self._build_credentials(response.json())
 
-    def cancel_login(self) -> None:
+    def cancel_login(self) -> None:  # pragma: no cover - interactive shim
         with self._lock:
             session = self._active_login
         if session:

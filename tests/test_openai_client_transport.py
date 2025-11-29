@@ -3,7 +3,49 @@ import json
 import httpx
 import pytest
 
-from lincona.openai_client.transport import HttpResponsesTransport, OpenAISDKResponsesTransport, _map_openai_event
+import lincona.openai_client.transport as transport_mod
+from lincona.config import AuthMode
+from lincona.openai_client.transport import (
+    AuthenticatedResponsesTransport,
+    HttpResponsesTransport,
+    OpenAISDKResponsesTransport,
+    _map_openai_event,
+)
+
+
+class StubAuthManager:
+    def __init__(
+        self,
+        *,
+        mode: AuthMode,
+        base_url: str,
+        token: str,
+        account_id: str | None = None,
+    ) -> None:
+        self._mode = mode
+        self._base_url = base_url
+        self._token = token
+        self._account_id = account_id
+        self.force_calls = 0
+
+    async def get_access_token(self) -> str:
+        return self._token
+
+    async def force_refresh(self) -> None:
+        self.force_calls += 1
+        self._token = f"{self._token}-refreshed"
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def account_id(self) -> str | None:
+        return self._account_id
+
+    @property
+    def mode(self) -> AuthMode:
+        return self._mode
 
 
 @pytest.mark.asyncio
@@ -16,6 +58,7 @@ async def test_http_transport_streams_and_sets_headers(fake_http_client_factory)
         chunks.append(chunk)
 
     await transport.aclose()
+    await client.aclose()
 
     recorded = client.recorded
     assert recorded["method"] == "POST"
@@ -39,6 +82,7 @@ async def test_http_transport_raises_on_http_errors(error_response_handler, mock
             pass
 
     await transport.aclose()
+    await client.aclose()
     await client.aclose()
 
 
@@ -76,6 +120,7 @@ async def test_logging_hook_records_status_and_request_id(successful_response_ha
         pass
 
     await transport.aclose()
+    await client.aclose()
     await client.aclose()
 
     assert events and events[0][0] == "response_complete"
@@ -198,6 +243,94 @@ async def test_sdk_transport_raises_http_status_with_body(failing_sdk_client_fac
         async for _ in transport.stream_response({"hello": "world"}):
             pass
     assert "body=bad" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_transport_sets_chatgpt_headers(monkeypatch):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text='data: {"type":"response.done"}\n')
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    auth = StubAuthManager(
+        mode=AuthMode.CHATGPT,
+        base_url="https://chatgpt.com/backend-api/codex",
+        token="tok",
+        account_id="acct-123",
+    )
+    transport = AuthenticatedResponsesTransport(auth, client=client)
+
+    chunks = []
+    async for chunk in transport.stream_response({"hello": "world"}):
+        chunks.append(chunk)
+
+    await transport.aclose()
+    assert chunks
+    assert requests and str(requests[0].url) == "https://chatgpt.com/backend-api/codex/responses"
+    assert requests[0].headers["Authorization"] == "Bearer tok"
+    assert requests[0].headers["ChatGPT-Account-Id"] == "acct-123"
+
+
+@pytest.mark.asyncio
+async def test_authenticated_transport_refreshes_after_401(monkeypatch):
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(401, text="unauthorized")
+        return httpx.Response(200, text='data: {"type":"response.done"}\n')
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    auth = StubAuthManager(
+        mode=AuthMode.CHATGPT,
+        base_url="https://chatgpt.com/backend-api/codex",
+        token="tok",
+        account_id=None,
+    )
+    transport = AuthenticatedResponsesTransport(auth, client=client)
+
+    chunks = []
+    async for chunk in transport.stream_response({"foo": "bar"}):
+        chunks.append(chunk)
+
+    await transport.aclose()
+    assert auth.force_calls == 1
+    assert calls["count"] == 2
+    assert chunks
+
+
+@pytest.mark.asyncio
+async def test_authenticated_transport_retries_rate_limit(monkeypatch):
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(429, text="slow down", headers={"Retry-After": "3"})
+        return httpx.Response(200, text='data: {"type":"response.done"}\n')
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(transport_mod.asyncio, "sleep", fake_sleep)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    auth = StubAuthManager(mode=AuthMode.API_KEY, base_url="https://api.openai.com/v1", token="tok")
+    transport = AuthenticatedResponsesTransport(auth, client=client)
+
+    chunks = []
+    async for chunk in transport.stream_response({"foo": "bar"}):
+        chunks.append(chunk)
+
+    await transport.aclose()
+    assert calls["count"] == 2
+    assert sleep_calls and sleep_calls[0] == 3.0
+    assert chunks
 
 
 def test_map_openai_event_unknown_returns_none():

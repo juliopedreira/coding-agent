@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lincona.config import ApprovalPolicy, FsMode, ModelCapabilities
+from lincona.config import ApprovalPolicy, AuthMode, FsMode, ModelCapabilities
 from lincona.openai_client.types import (
     ErrorEvent,
     Message,
@@ -266,11 +266,18 @@ def test_set_model_missing_defaults(
     assert "no default reasoning" in output
 
 
-def test_require_api_key_raises(settings, success_transport, settings_factory):
+def test_runner_requires_api_key_without_transport(settings_factory, mock_lincona_home, no_session_io):
+    no_key = settings_factory(api_key=None)
+    with pytest.raises(SystemExit):
+        AgentRunner(no_key)
+
+
+def test_runner_allows_custom_transport_without_api_key(
+    settings_factory, success_transport, mock_lincona_home, no_session_io
+):
     no_key = settings_factory(api_key=None)
     runner = AgentRunner(no_key, transport=success_transport)
-    with pytest.raises(SystemExit):
-        runner._require_api_key()
+    assert runner.settings.auth_mode is AuthMode.API_KEY
 
 
 def test_json_default_handles_bytes_and_path(tmp_path):

@@ -11,10 +11,11 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from lincona.config import ApprovalPolicy, FsMode, ReasoningEffort, Settings, Verbosity
+from lincona.auth import AuthError, AuthManager
+from lincona.config import ApprovalPolicy, AuthMode, FsMode, ReasoningEffort, Settings, Verbosity
 from lincona.logging import configure_session_logger
 from lincona.openai_client import OpenAIResponsesClient
-from lincona.openai_client.transport import OpenAISDKResponsesTransport, ResponsesTransport
+from lincona.openai_client.transport import AuthenticatedResponsesTransport, ResponsesTransport
 from lincona.openai_client.types import (
     ApplyPatchFreeform,
     ConversationRequest,
@@ -45,6 +46,7 @@ class AgentRunner:
         settings: Settings,
         *,
         transport: ResponsesTransport | None = None,
+        auth_manager: AuthManager | None = None,
         boundary_root: Path | None = None,
     ) -> None:
         self.settings = settings
@@ -67,8 +69,24 @@ class AgentRunner:
             self.boundary, self.approval_policy, shutdown_manager=shutdown_manager, logger=self.logger
         )
 
+        self.auth_manager = auth_manager or AuthManager(
+            auth_mode=self.settings.auth_mode,
+            api_key=self.settings.api_key,
+            home=self._home,
+            client_id=self.settings.auth_client_id,
+            login_port=self.settings.auth_login_port,
+        )
+
+        if transport is None and self.settings.auth_mode is AuthMode.API_KEY and not self.auth_manager.has_api_key():
+            raise SystemExit("OPENAI_API_KEY not set and auth_mode=api_key")
+
         transport_instance = cast(
-            ResponsesTransport, transport or OpenAISDKResponsesTransport(api_key=self._require_api_key())
+            ResponsesTransport,
+            transport
+            or AuthenticatedResponsesTransport(
+                self.auth_manager,
+                logger=self._log_transport_event,
+            ),
         )
         self.client = OpenAIResponsesClient(
             transport_instance,
@@ -287,7 +305,39 @@ class AgentRunner:
             self.router.boundary = self.boundary
             print(f"fs_mode set to {self.fs_mode.value}")
             return True
+        if cmd == "/auth":
+            return await self._handle_auth_command(parts[1:])
         return False
+
+    async def _handle_auth_command(self, args: list[str]) -> bool:
+        if not args:
+            print("usage: /auth <login|logout|status> [--force]")
+            return True
+        action = args[0].lower()
+        if action == "login":
+            force = "--force" in args
+            try:
+                creds = await self.auth_manager.login(force=force)
+            except AuthError as exc:
+                print(f"auth login failed: {exc}")
+                return True
+            self._apply_auth_mode(AuthMode.CHATGPT)
+            account_label = creds.account_id or "-"
+            print(f"ChatGPT login successful (account={account_label})")
+            return True
+        if action == "logout":
+            self.auth_manager.logout()
+            self._apply_auth_mode(AuthMode.API_KEY)
+            print("ChatGPT credentials cleared; API key mode active.")
+            return True
+        if action == "status":
+            cached = self.auth_manager.get_credentials()
+            account = cached.account_id if cached else None
+            token_state = "present" if cached else "missing"
+            print(f"mode={self.auth_manager.mode.value} account={account or '-'} token={token_state}")
+            return True
+        print("usage: /auth <login|logout|status> [--force]")
+        return True
 
     async def _rotate_session(self) -> None:  # pragma: no cover - session rotation interactive
         try:
@@ -426,11 +476,13 @@ class AgentRunner:
 
         return datetime.now(UTC)
 
-    def _require_api_key(self) -> str:
-        key = self.settings.api_key
-        if not key:
-            raise SystemExit("OPENAI_API_KEY not set and api_key missing in config")
-        return key
+    def _log_transport_event(self, name: str, payload: dict[str, object]) -> None:
+        if not self.logger:
+            return
+        self.logger.debug("transport %s %s", name, payload)
+
+    def _apply_auth_mode(self, mode: AuthMode) -> None:
+        self.settings = Settings(**{**self.settings.model_dump(), "auth_mode": mode})
 
     @staticmethod
     def _safe_write(text: str) -> None:  # pragma: no cover - IO guard

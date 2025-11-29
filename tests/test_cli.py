@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from lincona import __version__, cli
+from lincona.auth import AuthManager
 from lincona.config import FsMode, LogLevel
 
 
@@ -53,7 +54,7 @@ def test_config_print(mock_lincona_home, mock_print, settings_factory) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_runs_with_stub(mock_agent_runner_repl, no_session_io, restricted_settings):
+async def test_chat_runs_with_stub(mock_agent_runner_repl, no_session_io, restricted_settings, mock_lincona_home):
     called = {}
 
     async def fake_repl(self):
@@ -61,7 +62,16 @@ async def test_chat_runs_with_stub(mock_agent_runner_repl, no_session_io, restri
 
     mock_agent_runner_repl(side_effect=fake_repl)
 
-    await cli._run_chat(restricted_settings)
+    auth_manager = AuthManager(
+        auth_mode=restricted_settings.auth_mode,
+        api_key=restricted_settings.api_key,
+        home=mock_lincona_home,
+        client_id=restricted_settings.auth_client_id,
+        login_port=restricted_settings.auth_login_port,
+    )
+
+    await cli._run_chat(restricted_settings, auth_manager)
+    auth_manager.close()
 
     assert called["ran"] is True
 
@@ -221,6 +231,9 @@ def test_main_handles_unknown_command_branch(mock_argparse_parse_args, mock_run_
             fs_mode=None,
             approval_policy=None,
             log_level=None,
+            auth_mode=None,
+            auth_client_id=None,
+            auth_login_port=None,
             show_models_capabilities=False,
             config_path=None,
             json_payload=None,
@@ -245,6 +258,9 @@ def test_debug_flag_writes_log(tmp_path: Path) -> None:
         fs_mode=None,
         approval_policy=None,
         log_level=None,
+        auth_mode=None,
+        auth_client_id=None,
+        auth_login_port=None,
     )
     overrides = cli._collect_overrides(args, debug_enabled=True)
     assert overrides["log_level"] == LogLevel.DEBUG.value

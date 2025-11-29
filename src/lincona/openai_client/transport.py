@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 import httpx
 from openai import AsyncOpenAI
+
+from lincona.auth import AuthManager
+from lincona.config import AuthMode
 
 
 class ResponsesTransport(Protocol):
@@ -207,4 +212,106 @@ def _map_openai_event(event: Any) -> dict[str, Any] | None:
     return None
 
 
-__all__ = ["ResponsesTransport", "HttpResponsesTransport", "MockResponsesTransport", "OpenAISDKResponsesTransport"]
+class AuthenticatedResponsesTransport:
+    """Transport that obtains bearer tokens from AuthManager (API key or ChatGPT OAuth)."""
+
+    def __init__(
+        self,
+        auth_manager: AuthManager,
+        *,
+        timeout: httpx.Timeout | float | None = None,
+        client: httpx.AsyncClient | None = None,
+        user_agent: str | None = "lincona/0.1.0",
+        beta_header: str | None = "responses=v1",
+        logger: Callable[[str, dict[str, object]], None] | None = None,
+        max_rate_limit_retries: int = 6,
+    ) -> None:
+        self._auth = auth_manager
+        self._timeout = timeout or DEFAULT_TIMEOUT
+        self._client = client or httpx.AsyncClient(timeout=self._timeout)
+        self._owns_client = client is None
+        self._user_agent = user_agent
+        self._beta_header = beta_header
+        self._logger = logger
+        self._max_rate_limit_retries = max(0, max_rate_limit_retries)
+
+    async def stream_response(self, payload: Mapping[str, Any]) -> AsyncIterator[str | bytes]:
+        attempt = 0
+        refreshed = False
+        while True:
+            token = await self._auth.get_access_token()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            if self._user_agent:
+                headers["User-Agent"] = self._user_agent
+            if self._beta_header:
+                headers["OpenAI-Beta"] = self._beta_header
+            account_id = self._auth.account_id
+            if account_id:
+                headers["ChatGPT-Account-Id"] = account_id
+            url = f"{self._auth.base_url.rstrip('/')}/responses"
+            response = None
+            start = time.perf_counter()
+            try:
+                async with self._client.stream(
+                    "POST", url, json=payload, headers=headers, timeout=self._timeout
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        yield line
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response else None
+                if status == 401 and self._auth.mode == AuthMode.CHATGPT and not refreshed:
+                    await self._auth.force_refresh()
+                    refreshed = True
+                    continue
+                if status == 429 and self._auth.mode == AuthMode.API_KEY and attempt < self._max_rate_limit_retries:
+                    delay = _retry_delay(exc.response, attempt)
+                    attempt += 1
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+            except httpx.RequestError:
+                raise
+            else:
+                if self._logger and response is not None:
+                    duration = time.perf_counter() - start
+                    self._logger(
+                        "response_complete",
+                        {
+                            "status": response.status_code,
+                            "request_id": response.headers.get("x-request-id"),
+                            "duration_sec": duration,
+                            "base_url": self._auth.base_url,
+                        },
+                    )
+                return
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+
+def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+    if response is not None:
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+    base = min(60.0, max(1.0, 2**attempt))
+    return base + random.uniform(0, 1)
+
+
+__all__ = [
+    "ResponsesTransport",
+    "HttpResponsesTransport",
+    "MockResponsesTransport",
+    "OpenAISDKResponsesTransport",
+    "AuthenticatedResponsesTransport",
+]

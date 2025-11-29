@@ -16,7 +16,17 @@ from typing import Any
 from openai import OpenAI
 
 from lincona import __version__
-from lincona.config import ApprovalPolicy, FsMode, LogLevel, ReasoningEffort, Settings, Verbosity, load_settings
+from lincona.auth import AuthError, AuthManager
+from lincona.config import (
+    ApprovalPolicy,
+    AuthMode,
+    FsMode,
+    LogLevel,
+    ReasoningEffort,
+    Settings,
+    Verbosity,
+    load_settings,
+)
 from lincona.logging import _to_logging_level
 from lincona.paths import get_lincona_home
 from lincona.repl import AgentRunner
@@ -63,6 +73,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Log level override",
     )
     parser.add_argument(
+        "--auth-mode",
+        choices=[e.value for e in AuthMode],
+        dest="auth_mode",
+        help="Authentication mode (api_key or chatgpt)",
+    )
+    parser.add_argument(
+        "--auth-client-id",
+        dest="auth_client_id",
+        help="Override ChatGPT OAuth client id",
+    )
+    parser.add_argument(
+        "--auth-port",
+        dest="auth_login_port",
+        type=int,
+        help="Override local login callback port",
+    )
+    parser.add_argument(
         "--show-models-capabilities",
         action="store_true",
         help="Query OpenAI models API and print capability table (fails if API unreachable).",
@@ -96,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("path", help="Print config path")
     config_sub.add_parser("print", help="Print resolved settings")
 
+    # auth helper
+    auth_parser = subparsers.add_parser("auth", help="Manage authentication")
+    auth_parser.set_defaults(command="auth")
+    auth_sub = auth_parser.add_subparsers(dest="auth_cmd", required=True)
+    login_parser = auth_sub.add_parser("login", help="Sign in with ChatGPT OAuth")
+    login_parser.add_argument("--force", action="store_true", help="Force new login even if tokens exist")
+    login_parser.add_argument("--timeout", type=int, default=180, help="Login timeout in seconds")
+    auth_sub.add_parser("logout", help="Clear stored ChatGPT credentials")
+    auth_sub.add_parser("status", help="Show current auth status")
+
     return parser
 
 
@@ -115,7 +152,11 @@ def main(argv: list[str] | None = None) -> int:
 
     command = args.command or "chat"
     if command == "chat":
-        asyncio.run(_run_chat(settings))
+        auth_manager = _build_auth_manager(settings)
+        try:
+            asyncio.run(_run_chat(settings, auth_manager))
+        finally:
+            auth_manager.close()
         return 0
     if command == "tool":
         return _run_tool(settings, args)
@@ -123,13 +164,15 @@ def main(argv: list[str] | None = None) -> int:
         return _run_sessions(args)
     if command == "config":
         return _run_config(settings, args)
+    if command == "auth":
+        return _run_auth(settings, args)
 
     parser.error(f"unknown command {command}")
     return 1
 
 
-async def _run_chat(settings: Settings) -> None:
-    runner = AgentRunner(settings)
+async def _run_chat(settings: Settings, auth_manager: AuthManager) -> None:
+    runner = AgentRunner(settings, auth_manager=auth_manager)
     await runner.repl()
 
 
@@ -196,7 +239,64 @@ def _collect_overrides(args: argparse.Namespace, debug_enabled: bool) -> dict[st
         "fs_mode": args.fs_mode,
         "approval_policy": args.approval_policy,
         "log_level": log_level_override,
+        "auth_mode": args.auth_mode,
+        "auth_client_id": args.auth_client_id,
+        "auth_login_port": args.auth_login_port,
     }
+
+
+def _run_auth(settings: Settings, args: argparse.Namespace) -> int:
+    manager = _build_auth_manager(settings)
+    try:
+        if args.auth_cmd == "login":
+            return asyncio.run(_run_auth_login(manager, force=args.force, timeout=float(args.timeout)))
+        if args.auth_cmd == "logout":
+            manager.logout()
+            print("ChatGPT credentials removed; using API key mode next run.")
+            return 0
+        if args.auth_cmd == "status":
+            _print_auth_status(manager, settings)
+            return 0
+        return 1
+    finally:
+        manager.close()
+
+
+async def _run_auth_login(manager: AuthManager, *, force: bool, timeout: float) -> int:
+    try:
+        creds = await manager.login(force=force, timeout=timeout)
+    except AuthError as exc:
+        print(f"auth login failed: {exc}", file=sys.stderr)
+        return 1
+    account = creds.account_id or "unknown"
+    plan = creds.plan or "-"
+    print(f"Logged in as account={account} plan={plan}")
+    return 0
+
+
+def _print_auth_status(manager: AuthManager, settings: Settings) -> None:
+    creds = manager.get_credentials()
+    status = {
+        "mode": manager.mode.value,
+        "base_url": manager.base_url,
+        "api_key_present": manager.has_api_key(),
+        "account_id": creds.account_id if creds else None,
+        "plan": creds.plan if creds else None,
+        "token_cached": creds is not None,
+        "token_path": str(manager.storage_path),
+        "config_auth_mode": settings.auth_mode.value,
+    }
+    print(json.dumps(status, indent=2))
+
+
+def _build_auth_manager(settings: Settings) -> AuthManager:
+    return AuthManager(
+        auth_mode=settings.auth_mode,
+        api_key=settings.api_key,
+        home=get_lincona_home(),
+        client_id=settings.auth_client_id,
+        login_port=settings.auth_login_port,
+    )
 
 
 def _run_show_models_capabilities(settings: Settings) -> int:
