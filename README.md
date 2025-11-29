@@ -48,28 +48,39 @@ POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run pre-commit run --all-files
 - Run a tool directly: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona tool list_dir --arg path=. --arg depth=1`
 - Inspect sessions: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona sessions list`
 
-## Configuration & data directories
-- Base directory: `~/.lincona/` (override with env `LINCONA_HOME=/custom/path`).
-- Files (created on first run if missing):
-  - `config.toml` – persisted defaults.
-  - `sessions/<id>.jsonl` – append-only session transcripts.
-  - `logs/<id>.log` – per-session plaintext logs (truncated to 5MB by default).
-- Environment: `OPENAI_API_KEY` overrides `api_key` in config.
-- Models: default `gpt-5.1-codex-mini`; allowed set by `[model].allowed` (defaults to `["gpt-5","gpt-5-codex","gpt-5-mini","gpt-5-nano","gpt-5-pro","gpt-5.1","gpt-5.1-codex","gpt-5.1-codex-mini"]`). `/model:set` must pick from that list.
+## Configuration & data
+- Location: `~/.lincona/` (override with `LINCONA_HOME=/custom/path`).
+- Files (created on first run): `config.toml`, `sessions/<id>.jsonl`, `logs/<id>.log` (logs truncated to 5MB). `config.toml` is written with `0600` permissions.
+- Load order: CLI flags > environment (`OPENAI_API_KEY`, etc.) > `config.toml` > built-ins.
+- Inspect: `POETRY_VIRTUALENVS_IN_PROJECT=1 poetry run lincona config path` and `... config print`.
 
-Example `~/.lincona/config.toml`:
+### `config.toml` reference
 ```toml
-api_key = "sk-..."                    # or use env OPENAI_API_KEY
+[auth]
+api_key = "sk-..."                # or set OPENAI_API_KEY
+
 [model]
-id = "gpt-5.1-codex-mini"
-allowed = ["gpt-5","gpt-5-codex","gpt-5-mini","gpt-5-nano","gpt-5-pro","gpt-5.1","gpt-5.1-codex","gpt-5.1-codex-mini"]
-reasoning_effort = "medium"
+id = "gpt-5.1-codex-mini"         # must exist in [models."<id>"] or start with "gpt-5"
+reasoning_effort = "medium"       # none|minimal|low|medium|high (optional override)
+verbosity = "medium"              # low|medium|high (optional override)
+
+[models."gpt-5.1-codex-mini"]     # capability table for the model
+reasoning_effort = ["none","minimal","low","medium","high"]
+default_reasoning = "none"
+verbosity = ["low","medium","high"]
+default_verbosity = "medium"
+
 [runtime]
-fs_mode = "restricted"
-approval_policy = "on-request"
+fs_mode = "restricted"            # restricted|unrestricted (tool filesystem boundary)
+approval_policy = "on-request"    # never|on-request|always (tool approval prompts)
+
 [logging]
-log_level = "info"
+log_level = "info"                # debug|info|warning|error
 ```
+Notes:
+- `OPENAI_API_KEY` overrides `[auth].api_key`; blanks are ignored.
+- To allow an additional model, add another `[models."<id>"]` block with its supported `reasoning_effort`/`verbosity`. If the `model` id starts with `gpt-5` and is not listed, Lincona reuses the seed capabilities above.
+- Avoid committing `config.toml`; keep the key out of version control.
 
 ## Where to learn more
 - Developer internals and module layout: see `ARCHITECTURE.md`.
