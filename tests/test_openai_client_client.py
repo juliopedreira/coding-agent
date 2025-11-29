@@ -99,40 +99,46 @@ async def test_tool_messages_are_filtered_from_payload(capturing_transport) -> N
 
 
 @pytest.mark.asyncio
-async def test_http_errors_are_mapped(mock_transport_error, conversation_request_factory) -> None:
-    transport = mock_transport_error(status_code=401)
+@pytest.mark.parametrize(
+    "status_code,expected_error_type",
+    [
+        (401, ApiAuthError),
+        (429, ApiRateLimitError),
+        (500, ApiServerError),
+    ],
+)
+async def test_http_errors_are_mapped(
+    mock_transport_error, conversation_request_factory, status_code: int, expected_error_type: type[ApiError]
+) -> None:
+    """Test that HTTP errors are correctly mapped to API error types using parameterization."""
+    transport = mock_transport_error(status_code=status_code)
     client = OpenAIResponsesClient(transport)
     request = conversation_request_factory()
 
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
-    assert isinstance(events[0].error, ApiAuthError)
-
-    transport = mock_transport_error(status_code=429)
-    client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(conversation_request_factory())]
-    assert isinstance(events[0].error, ApiRateLimitError)
-
-    transport = mock_transport_error(status_code=500)
-    client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(conversation_request_factory())]
-    assert isinstance(events[0].error, ApiServerError)
+    assert isinstance(events[0].error, expected_error_type)
 
 
 @pytest.mark.asyncio
-async def test_timeout_and_request_error_mapping(error_transport_factory, conversation_request_factory) -> None:
-    transport = error_transport_factory(httpx.ReadTimeout("timeout"))
+@pytest.mark.parametrize(
+    "error,expected_error_type",
+    [
+        (httpx.ReadTimeout("timeout"), ApiTimeoutError),
+        (httpx.RequestError("boom"), ApiClientError),
+    ],
+)
+async def test_timeout_and_request_error_mapping(
+    error_transport_factory, conversation_request_factory, error: Exception, expected_error_type: type[ApiError]
+) -> None:
+    """Test that timeout and request errors are correctly mapped using parameterization."""
+    transport = error_transport_factory(error)
     client = OpenAIResponsesClient(transport)
     request = conversation_request_factory()
 
     events = [event async for event in client.submit(request)]
     assert isinstance(events[0], ErrorEvent)
-    assert isinstance(events[0].error, ApiTimeoutError)
-
-    transport = error_transport_factory(httpx.RequestError("boom"))
-    client = OpenAIResponsesClient(transport)
-    events = [event async for event in client.submit(conversation_request_factory())]
-    assert isinstance(events[0].error, ApiClientError)
+    assert isinstance(events[0].error, expected_error_type)
 
 
 @pytest.mark.asyncio
@@ -198,28 +204,36 @@ def test_message_to_content_includes_tool_call_id() -> None:
     assert content["tool_call_id"] == "tc1"
 
 
-def test_status_error_mapping_function() -> None:
+@pytest.mark.parametrize(
+    "status_code,headers,expected_error_type,error_message_contains",
+    [
+        (401, None, ApiAuthError, None),
+        (429, None, ApiRateLimitError, None),
+        (429, {"Retry-After": "2"}, ApiRateLimitError, "retry after 2"),
+        (500, None, ApiServerError, None),
+        (404, None, ApiClientError, None),
+    ],
+)
+def test_status_error_mapping_function(
+    httpx_response_factory,
+    status_code: int,
+    headers: dict[str, str] | None,
+    expected_error_type: type[ApiError],
+    error_message_contains: str | None,
+) -> None:
+    """Test status error mapping using parameterization to reduce redundancy."""
     request = httpx.Request("POST", "https://example.com")
-    resp_401 = httpx.Response(401, request=request)
-    err = httpx.HTTPStatusError("auth", request=request, response=resp_401)
-    assert isinstance(_map_status_error(err), ApiAuthError)
+    response = httpx_response_factory(status_code=status_code, request=request, headers=headers)
+    err = httpx.HTTPStatusError("test", request=request, response=response)
 
-    resp_429 = httpx.Response(429, request=request)
-    err = httpx.HTTPStatusError("rate", request=request, response=resp_429)
-    assert isinstance(_map_status_error(err), ApiRateLimitError)
-    assert "retry" not in str(_map_status_error(err))
+    mapped_error = _map_status_error(err)
+    assert isinstance(mapped_error, expected_error_type)
 
-    resp_429_retry = httpx.Response(429, headers={"Retry-After": "2"}, request=request)
-    err = httpx.HTTPStatusError("rate", request=request, response=resp_429_retry)
-    assert "retry after 2" in str(_map_status_error(err))
-
-    resp_500 = httpx.Response(500, request=request)
-    err = httpx.HTTPStatusError("server", request=request, response=resp_500)
-    assert isinstance(_map_status_error(err), ApiServerError)
-
-    resp_404 = httpx.Response(404, request=request)
-    err = httpx.HTTPStatusError("client", request=request, response=resp_404)
-    assert isinstance(_map_status_error(err), ApiClientError)
+    if error_message_contains:
+        assert error_message_contains in str(mapped_error)
+    elif status_code == 429 and headers is None:
+        # Special case: 429 without retry header should not contain "retry"
+        assert "retry" not in str(mapped_error)
 
 
 @pytest.mark.asyncio

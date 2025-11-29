@@ -990,6 +990,76 @@ def mock_path_replace(mocker):
     return _factory
 
 
+@pytest.fixture
+def mock_named_temporary_file(mocker):
+    """Factory fixture for mocking tempfile.NamedTemporaryFile with customizable behavior.
+
+    Returns a function that creates a mock for tempfile.NamedTemporaryFile. The mock can be
+    customized by passing a side_effect function or by using the default behavior that wraps
+    the real NamedTemporaryFile.
+    """
+
+    def _factory(side_effect=None, module=None):
+        """Create a mock for tempfile.NamedTemporaryFile.
+
+        Args:
+            side_effect: Custom side effect function (if None, wraps real NamedTemporaryFile)
+            module: Module object to patch (default: tempfile, but can be module-specific like apply_patch_mod.tempfile)
+
+        Returns:
+            Mock object for NamedTemporaryFile
+        """
+        import tempfile
+
+        if module is None:
+            module = tempfile
+
+        if side_effect is not None:
+            return mocker.patch.object(module, "NamedTemporaryFile", autospec=True, side_effect=side_effect)
+
+        # Default: wrap real NamedTemporaryFile to allow tracking
+        real_namedtemp = tempfile.NamedTemporaryFile
+
+        def fake_namedtemp(*args, **kwargs):
+            return real_namedtemp(*args, **kwargs)
+
+        return mocker.patch.object(module, "NamedTemporaryFile", autospec=True, side_effect=fake_namedtemp)
+
+    return _factory
+
+
+@pytest.fixture
+def httpx_response_factory():
+    """Factory fixture for creating httpx.Response objects with common configurations.
+
+    Returns a function that creates httpx.Response objects with customizable status codes,
+    headers, and request objects.
+    """
+
+    def _factory(
+        status_code: int,
+        request: httpx.Request | None = None,
+        headers: dict[str, str] | None = None,
+        text: str = "",
+    ) -> httpx.Response:
+        """Create an httpx.Response object.
+
+        Args:
+            status_code: HTTP status code
+            request: Optional httpx.Request object (default: creates a dummy POST request)
+            headers: Optional response headers
+            text: Optional response body text
+
+        Returns:
+            httpx.Response object
+        """
+        if request is None:
+            request = httpx.Request("POST", "https://example.com")
+        return httpx.Response(status_code, request=request, headers=headers or {}, text=text)
+
+    return _factory
+
+
 # ============================================================================
 # Consolidated CLI Mock Fixtures
 # ============================================================================
