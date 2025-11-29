@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 import lincona.tools.grep_files as grep_mod
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
@@ -147,10 +145,9 @@ def test_iter_files_skips_dirs(tmp_path: Path) -> None:
     assert files == []
 
 
-def test_grep_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
-    monkeypatch.setattr(
-        "lincona.tools.grep_files.grep_files",
-        lambda boundary, **kwargs: [FileMatches(file="a", matches=[LineMatch(line_num=1, line="hit", truncated=None)])],
+def test_grep_tool_execute_and_end_event(mock_grep_files_factory, restricted_boundary) -> None:
+    mock_grep_files_factory(
+        return_value=[FileMatches(file="a", matches=[LineMatch(line_num=1, line="hit", truncated=None)])]
     )
     tool = GrepFilesTool(restricted_boundary)
     output = tool.execute(GrepFilesInput(pattern="hit"))

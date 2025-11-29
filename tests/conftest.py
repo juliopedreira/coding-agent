@@ -1168,6 +1168,273 @@ def httpx_response_factory(httpx_request_factory):
 
 
 # ============================================================================
+# Exec PTY Mock Factory Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_select_select_factory(mocker):
+    """Factory fixture for mocking select.select."""
+
+    def _factory(side_effect=None, return_value=None):
+        """Create a mock for select.select.
+
+        Args:
+            side_effect: Side effect function for select.select (takes precedence)
+            return_value: Return value for select.select (default: (fds, [], []))
+
+        Returns:
+            Mock object for select.select
+        """
+        if side_effect is not None:
+            return mocker.patch("select.select", autospec=True, side_effect=side_effect)
+        if return_value is None:
+
+            def default_select(fds, *_):
+                return (fds, [], [])
+
+            return_value = default_select
+        return mocker.patch("select.select", autospec=True, side_effect=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_os_read_factory(mocker):
+    """Factory fixture for mocking os.read."""
+
+    def _factory(side_effect=None, return_value=None):
+        """Create a mock for os.read.
+
+        Args:
+            side_effect: Side effect function for os.read (takes precedence)
+            return_value: Return value for os.read (default: b"")
+
+        Returns:
+            Mock object for os.read
+        """
+        if side_effect is not None:
+            return mocker.patch("os.read", autospec=True, side_effect=side_effect)
+        if return_value is None:
+            return_value = b""
+        return mocker.patch("os.read", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_pty_manager_read_factory(monkeypatch):
+    """Factory fixture for mocking PtyManager._read method."""
+
+    def _factory(manager, side_effect=None):
+        """Create a mock for PtyManager._read.
+
+        Args:
+            manager: PtyManager instance to patch
+            side_effect: Side effect function for _read (required)
+
+        Returns:
+            None (patches in place)
+        """
+        if side_effect is None:
+
+            def default_read(sid):
+                return {"output": "", "truncated": False}
+
+            side_effect = default_read
+        monkeypatch.setattr(manager, "_read", side_effect)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_os_write_factory(monkeypatch):
+    """Factory fixture for mocking os.write."""
+
+    def _factory(side_effect=None, target_module=None):
+        """Create a mock for os.write.
+
+        Args:
+            side_effect: Side effect function for os.write (default: returns len(data))
+            target_module: Module to patch (default: lincona.tools.exec_pty.os)
+
+        Returns:
+            None (patches in place)
+        """
+        if target_module is None:
+            target_module = "lincona.tools.exec_pty.os"
+        if side_effect is None:
+
+            def default_write(fd, data):
+                return len(data)
+
+            side_effect = default_write
+        monkeypatch.setattr(target_module, "write", side_effect)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_os_close_factory(monkeypatch):
+    """Factory fixture for mocking os.close."""
+
+    def _factory(side_effect=None, target_module=None):
+        """Create a mock for os.close.
+
+        Args:
+            side_effect: Side effect function for os.close (default: no-op)
+            target_module: Module to patch (default: os or lincona.tools.exec_pty.os)
+
+        Returns:
+            None (patches in place)
+        """
+        if side_effect is None:
+
+            def default_close(fd):
+                return None
+
+            side_effect = default_close
+        if target_module is None:
+            target_module = "os"
+        monkeypatch.setattr(target_module, "close", side_effect)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_truncate_output_factory(monkeypatch):
+    """Factory fixture for mocking lincona.tools.exec_pty.truncate_output."""
+
+    def _factory(side_effect=None):
+        """Create a mock for truncate_output.
+
+        Args:
+            side_effect: Side effect function for truncate_output (required)
+
+        Returns:
+            None (patches in place)
+        """
+        if side_effect is None:
+
+            def default_truncate(text, max_bytes, max_lines):
+                return (text, False)
+
+            side_effect = default_truncate
+        monkeypatch.setattr("lincona.tools.exec_pty.truncate_output", side_effect)
+
+    return _factory
+
+
+# ============================================================================
+# Tool Function Mock Factory Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_run_shell_factory(mocker):
+    """Factory fixture for mocking lincona.tools.shell.run_shell."""
+
+    def _factory(return_value=None, side_effect=None):
+        """Create a mock for run_shell.
+
+        Args:
+            return_value: Return value for run_shell
+            side_effect: Side effect function for run_shell (takes precedence)
+
+        Returns:
+            Mock object for run_shell
+        """
+        if side_effect is not None:
+            return mocker.patch("lincona.tools.shell.run_shell", autospec=True, side_effect=side_effect)
+        if return_value is None:
+            return_value = {
+                "stdout": "ok",
+                "stderr": "",
+                "returncode": 0,
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "timeout": False,
+                "message": None,
+            }
+        return mocker.patch("lincona.tools.shell.run_shell", autospec=True, return_value=return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_read_file_factory(monkeypatch):
+    """Factory fixture for mocking lincona.tools.read_file.read_file."""
+
+    def _factory(return_value=None, side_effect=None):
+        """Create a mock for read_file.
+
+        Args:
+            return_value: Return value for read_file (default: ("ok", False))
+            side_effect: Side effect function for read_file (takes precedence)
+
+        Returns:
+            None (patches in place)
+        """
+        if side_effect is not None:
+            monkeypatch.setattr("lincona.tools.read_file.read_file", side_effect)
+        else:
+            if return_value is None:
+                return_value = ("ok", False)
+            monkeypatch.setattr("lincona.tools.read_file.read_file", lambda boundary, **kwargs: return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_grep_files_factory(monkeypatch):
+    """Factory fixture for mocking lincona.tools.grep_files.grep_files."""
+
+    def _factory(return_value=None, side_effect=None):
+        """Create a mock for grep_files.
+
+        Args:
+            return_value: Return value for grep_files (default: [])
+            side_effect: Side effect function for grep_files (takes precedence)
+
+        Returns:
+            None (patches in place)
+        """
+        if side_effect is not None:
+            monkeypatch.setattr("lincona.tools.grep_files.grep_files", side_effect)
+        else:
+            if return_value is None:
+                return_value = []
+            monkeypatch.setattr("lincona.tools.grep_files.grep_files", lambda boundary, **kwargs: return_value)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_exec_pty_base(monkeypatch: pytest.MonkeyPatch):
+    """Consolidated fixture that patches common exec_pty dependencies in one go.
+
+    Patches:
+    - exec_mod.pty.openpty
+    - exec_mod.subprocess.Popen
+    - exec_mod.os.close
+    """
+    from types import SimpleNamespace
+
+    import lincona.tools.exec_pty as exec_mod
+
+    proc = SimpleNamespace(
+        returncode=None,
+        terminate=lambda self=None: None,
+        kill=lambda self=None: None,
+        wait=lambda self=None, timeout=2: None,
+    )
+    monkeypatch.setattr(exec_mod.pty, "openpty", lambda: (11, 12))
+    monkeypatch.setattr(exec_mod.subprocess, "Popen", lambda *a, **k: proc)
+    monkeypatch.setattr(exec_mod.os, "close", lambda fd: None)
+    return proc
+
+
+# ============================================================================
 # Consolidated CLI Mock Fixtures
 # ============================================================================
 

@@ -48,6 +48,11 @@ class Verbosity(str, Enum):
     HIGH = "high"
 
 
+class AuthMode(str, Enum):
+    API_KEY = "api_key"
+    CHATGPT = "chatgpt"
+
+
 class ModelCapabilities(BaseModel):
     """Resolved Lincona settings with per-model capabilities."""
 
@@ -108,6 +113,12 @@ SEED_CAPABILITIES = ModelCapabilities(
 )
 
 
+DEFAULT_CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+DEFAULT_CHATGPT_LOGIN_PORT = 1455
+DEFAULT_CONFIG_PATH = Path.home() / ".lincona" / "config.toml"
+EXPECTED_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0o600
+
+
 def _default_models() -> dict[str, ModelCapabilities]:
     return {SEED_MODEL_ID: SEED_CAPABILITIES}
 
@@ -125,6 +136,9 @@ class Settings(BaseModel):
     fs_mode: FsMode = FsMode.RESTRICTED
     approval_policy: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
     log_level: LogLevel = LogLevel.INFO
+    auth_mode: AuthMode = AuthMode.API_KEY
+    auth_client_id: str = "app_EMoamEEZ73f0CkXaXp7hrann"
+    auth_login_port: int = 1455
 
     @field_validator("api_key")
     @classmethod
@@ -151,23 +165,20 @@ class Settings(BaseModel):
     def _validate_verbosity_value(cls, value: Verbosity | None) -> Verbosity | None:
         return value
 
+    @field_validator("auth_client_id")
+    @classmethod
+    def _validate_client_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("auth_client_id cannot be empty")
+        return cleaned
 
-DEFAULT_CONFIG_PATH = Path.home() / ".lincona" / "config.toml"
-EXPECTED_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0o600
-
-SEED_MODEL_ID = "gpt-5.1-codex-mini"
-SEED_CAPABILITIES = ModelCapabilities(
-    reasoning_effort=(
-        ReasoningEffort.NONE,
-        ReasoningEffort.MINIMAL,
-        ReasoningEffort.LOW,
-        ReasoningEffort.MEDIUM,
-        ReasoningEffort.HIGH,
-    ),
-    default_reasoning=ReasoningEffort.NONE,
-    verbosity=(Verbosity.LOW, Verbosity.MEDIUM, Verbosity.HIGH),
-    default_verbosity=Verbosity.MEDIUM,
-)
+    @field_validator("auth_login_port")
+    @classmethod
+    def _validate_login_port(cls, value: int) -> int:
+        if not (1 <= value <= 65535):
+            raise ValueError("auth_login_port must be between 1 and 65535")
+        return value
 
 
 def load_settings(
@@ -235,6 +246,27 @@ def load_settings(
         defaults.log_level,
     )
 
+    auth_mode = _first_value(
+        _clean_str(cli_overrides.get("auth_mode")),
+        _clean_str(env.get("LINCONA_AUTH_MODE")),
+        _clean_str(_get_config_value(config_data, "auth", "mode")),
+        defaults.auth_mode.value,
+    )
+
+    auth_client_id = _first_value(
+        _clean_str(cli_overrides.get("auth_client_id")),
+        _clean_str(env.get("LINCONA_AUTH_CLIENT_ID")),
+        _clean_str(_get_config_value(config_data, "auth", "client_id")),
+        defaults.auth_client_id,
+    )
+
+    auth_login_port = _first_value(
+        cli_overrides.get("auth_login_port"),
+        _clean_str(env.get("LINCONA_AUTH_PORT")),
+        _clean_str(_get_config_value(config_data, "auth", "login_port")),
+        defaults.auth_login_port,
+    )
+
     models_section = _parse_models(config_data.get("models", {}))
     if not models_section:
         models_section = _default_models()
@@ -254,6 +286,16 @@ def load_settings(
 
     log_level_enum = _coerce_enum(log_level, LogLevel, LogLevel.INFO)
     log_level_val = cast(LogLevel, log_level_enum or LogLevel.INFO)
+
+    auth_mode_enum = _coerce_enum(auth_mode, AuthMode, AuthMode.API_KEY)
+    auth_mode_val = cast(AuthMode, auth_mode_enum or AuthMode.API_KEY)
+
+    auth_login_port_val = defaults.auth_login_port
+    if auth_login_port is not None:
+        try:
+            auth_login_port_val = int(auth_login_port)
+        except (TypeError, ValueError):
+            auth_login_port_val = defaults.auth_login_port
 
     selected_cap = models_section[model]
     applied_reasoning = reasoning_effort or selected_cap.default_reasoning
@@ -278,6 +320,9 @@ def load_settings(
         fs_mode=fs_mode_val,
         approval_policy=approval_policy_val,
         log_level=log_level_val,
+        auth_mode=auth_mode_val,
+        auth_client_id=auth_client_id or defaults.auth_client_id,
+        auth_login_port=auth_login_port_val,
     )
 
     if created_new:
@@ -292,6 +337,9 @@ def write_config(settings: Settings, config_path: Path | str | None = None) -> P
     sections: list[str] = []
 
     auth_section: dict[str, Any] = {}
+    auth_section["mode"] = settings.auth_mode.value
+    auth_section["client_id"] = settings.auth_client_id
+    auth_section["login_port"] = settings.auth_login_port
     if settings.api_key is not None:
         auth_section["api_key"] = settings.api_key
     _append_section(sections, "auth", auth_section)
@@ -346,6 +394,9 @@ def _seed_settings() -> Settings:
         fs_mode=FsMode.RESTRICTED,
         approval_policy=ApprovalPolicy.ON_REQUEST,
         log_level=LogLevel.INFO,
+        auth_mode=AuthMode.API_KEY,
+        auth_client_id=DEFAULT_CHATGPT_CLIENT_ID,
+        auth_login_port=DEFAULT_CHATGPT_LOGIN_PORT,
     )
 
 
@@ -473,6 +524,7 @@ __all__ = [
     "LogLevel",
     "ReasoningEffort",
     "Verbosity",
+    "AuthMode",
     "ModelCapabilities",
     "DEFAULT_CONFIG_PATH",
     "load_settings",

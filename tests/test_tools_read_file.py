@@ -46,8 +46,8 @@ def test_invalid_mode_raises(tmp_path: Path) -> None:
         read_file(boundary, "f.txt", mode="invalid")
 
 
-def test_read_file_tool_execute_and_end_event(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:
-    monkeypatch.setattr("lincona.tools.read_file.read_file", lambda boundary, **kwargs: ("ok", False))
+def test_read_file_tool_execute_and_end_event(mock_read_file_factory, restricted_boundary) -> None:
+    mock_read_file_factory(return_value=("ok", False))
     tool = ReadFileTool(restricted_boundary)
     output = tool.execute(ReadFileInput(path="f.txt"))
     assert isinstance(output, ReadFileOutput)

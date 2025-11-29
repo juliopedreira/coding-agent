@@ -57,20 +57,8 @@ def test_shell_input_casts_path_workdir():
     assert isinstance(validated.workdir, str)
 
 
-def test_shell_tool_execute_and_end_event(mocker, restricted_boundary):
-    mocker.patch(
-        "lincona.tools.shell.run_shell",
-        autospec=True,
-        return_value={
-            "stdout": "ok",
-            "stderr": "",
-            "returncode": 0,
-            "stdout_truncated": False,
-            "stderr_truncated": False,
-            "timeout": False,
-            "message": None,
-        },
-    )
+def test_shell_tool_execute_and_end_event(mock_run_shell_factory, restricted_boundary):
+    mock_run_shell_factory()
     tool = ShellTool(restricted_boundary)
     output = tool.execute(ShellInput(command="echo", workdir=None, timeout_ms=1))
     assert isinstance(output, ShellOutput)

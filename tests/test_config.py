@@ -150,12 +150,15 @@ id = "gpt-5.new"
     assert settings.reasoning_effort in settings.models["gpt-5.new"].reasoning_effort
 
 
-def test_write_config_skips_empty_sections(tmp_path: Path) -> None:
+def test_write_config_includes_auth_section(tmp_path: Path) -> None:
     cfg = tmp_path / "config.toml"
     settings = Settings()
     write_config(settings, cfg)
     text = cfg.read_text()
-    assert "[auth]" not in text  # api_key None => section omitted
+    assert "[auth]" in text
+    assert 'mode = "api_key"' in text
+    assert 'client_id = "app_EMoamEEZ73f0CkXaXp7hrann"' in text
+    assert "api_key =" not in text  # api_key None => field omitted even though section exists
 
 
 def test_verbosity_default_first_item_when_missing_default(tmp_path: Path) -> None:

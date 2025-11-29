@@ -18,42 +18,35 @@ from lincona.tools.exec_pty import (
 from lincona.tools.fs import FsBoundary
 
 
-@pytest.fixture
-def fake_pty(monkeypatch: pytest.MonkeyPatch):
-    """Stub out PTY creation and process spawning to avoid real OS interaction."""
-
-    proc = SimpleNamespace(
-        returncode=None,
-        terminate=lambda self=None: None,
-        kill=lambda self=None: None,
-        wait=lambda self=None, timeout=2: None,
-    )
-    monkeypatch.setattr(exec_mod.pty, "openpty", lambda: (11, 12))
-    monkeypatch.setattr(exec_mod.subprocess, "Popen", lambda *a, **k: proc)
-    monkeypatch.setattr(exec_mod.os, "close", lambda fd: None)
-    return proc
-
-
-def test_exec_command_outputs(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+def test_exec_command_outputs(
+    restricted_boundary,
+    mock_exec_pty_base,
+    mock_pty_manager_read_factory,
+) -> None:
     manager = PtyManager(restricted_boundary, max_bytes=1024, max_lines=50)
-    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "hello", "truncated": False})
+    mock_pty_manager_read_factory(manager, side_effect=lambda sid: {"output": "hello", "truncated": False})
 
     result = manager.exec_command("s1", "echo hello", workdir=".")
 
     assert result["output"] == "hello"
-    assert manager.sessions["s1"].proc is fake_pty
+    assert manager.sessions["s1"].proc is mock_exec_pty_base
 
 
-def test_write_stdin_appends_output(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+def test_write_stdin_appends_output(
+    restricted_boundary,
+    mock_exec_pty_base,
+    mock_os_write_factory,
+    mock_pty_manager_read_factory,
+) -> None:
     manager = PtyManager(restricted_boundary)
-    monkeypatch.setattr(exec_mod.os, "write", lambda fd, data: len(data))
+    mock_os_write_factory(target_module=exec_mod.os)
     responses = iter(
         [
             {"output": "init", "truncated": False},
             {"output": "hi", "truncated": False},
         ]
     )
-    monkeypatch.setattr(manager, "_read", lambda sid: next(responses))
+    mock_pty_manager_read_factory(manager, side_effect=lambda sid: next(responses))
 
     manager.exec_command("s2", "cat", workdir=".")
     result = manager.write_stdin("s2", "hi\n")
@@ -69,9 +62,13 @@ def test_missing_session_raises(tmp_path: Path) -> None:
         manager.write_stdin("missing", "data")
 
 
-def test_truncation_in_pty(restricted_boundary, monkeypatch: pytest.MonkeyPatch, fake_pty) -> None:
+def test_truncation_in_pty(
+    restricted_boundary,
+    mock_exec_pty_base,
+    mock_pty_manager_read_factory,
+) -> None:
     manager = PtyManager(restricted_boundary, max_bytes=10, max_lines=2)
-    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "123\n[truncated]", "truncated": True})
+    mock_pty_manager_read_factory(manager, side_effect=lambda sid: {"output": "123\n[truncated]", "truncated": True})
 
     result = manager.exec_command("s3", "ignored")
 
@@ -79,9 +76,9 @@ def test_truncation_in_pty(restricted_boundary, monkeypatch: pytest.MonkeyPatch,
     assert result["output"].endswith("[truncated]")
 
 
-def test_close_all_clears_sessions(restricted_boundary, fake_pty, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_close_all_clears_sessions(restricted_boundary, mock_exec_pty_base, mock_pty_manager_read_factory) -> None:
     manager = PtyManager(restricted_boundary)
-    monkeypatch.setattr(manager, "_read", lambda sid: {"output": "", "truncated": False})
+    mock_pty_manager_read_factory(manager, side_effect=lambda sid: {"output": "", "truncated": False})
     manager.exec_command("s4", "echo hi", workdir=".")
     assert "s4" in manager.sessions
     manager.close_all()
@@ -141,50 +138,54 @@ def test_close_all_handles_exceptions(monkeypatch):
     manager.close_all()  # should swallow and continue
 
 
-def test_close_handles_closed_fd(monkeypatch, restricted_boundary, fake_pty):
+def test_close_handles_closed_fd(
+    restricted_boundary, mock_exec_pty_base, mock_pty_manager_read_factory, mock_os_close_factory
+):
     mgr = PtyManager(restricted_boundary)
-    monkeypatch.setattr(mgr, "_read", lambda sid: {"output": "", "truncated": False})
+    mock_pty_manager_read_factory(mgr, side_effect=lambda sid: {"output": "", "truncated": False})
     mgr.exec_command("s1", "sleep 1", workdir=".")
-    monkeypatch.setattr(os, "close", lambda fd: None)
+    mock_os_close_factory(target_module=os)
     mgr.close("s1")  # should not raise
 
 
-def test_read_handles_empty_chunk(monkeypatch):
+def test_read_handles_empty_chunk(mock_select_select_factory, mock_os_read_factory):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary)
     manager.sessions["sid"] = type("S", (), {"proc": None, "fd": 123, "cwd": Path(".")})
     manager._cumulative["sid"] = 0
 
-    monkeypatch.setattr("select.select", lambda fds, *_: (fds, [], []))
-    monkeypatch.setattr("os.read", lambda fd, size: b"")
+    mock_select_select_factory(side_effect=lambda fds, *_: (fds, [], []))
+    mock_os_read_factory(return_value=b"")
     result = manager._read("sid")
     assert result["output"] == ""
     assert result["truncated"] is False
 
 
-def test_read_appends_truncated_marker(monkeypatch):
+def test_read_appends_truncated_marker(mock_select_select_factory, mock_truncate_output_factory):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary, max_bytes=5)
     manager.sessions["sid"] = type("S", (), {"proc": None, "fd": 123, "cwd": Path(".")})
     manager._cumulative["sid"] = 10
 
-    monkeypatch.setattr("select.select", lambda fds, *_: ([], [], []))
+    mock_select_select_factory(side_effect=lambda fds, *_: ([], [], []))
     # force truncate_output to return text without marker
-    monkeypatch.setattr("lincona.tools.exec_pty.truncate_output", lambda text, max_bytes, max_lines: ("abc", True))
+    mock_truncate_output_factory(side_effect=lambda text, max_bytes, max_lines: ("abc", True))
     result = manager._read("sid")
     assert result["truncated"] is True
     assert result["output"].endswith("[truncated]")
 
 
-def test_read_truncated_with_existing_newline(monkeypatch):
+def test_read_truncated_with_existing_newline(
+    mock_select_select_factory, mock_truncate_output_factory, mock_os_read_factory
+):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary, max_bytes=5)
     manager.sessions["sid3"] = type("S", (), {"proc": None, "fd": 125, "cwd": Path(".")})
     manager._cumulative["sid3"] = manager.max_bytes + 1
 
-    monkeypatch.setattr("select.select", lambda fds, *_: ([], [], []))
-    monkeypatch.setattr("lincona.tools.exec_pty.truncate_output", lambda text, max_bytes, max_lines: ("hi\n", True))
-    monkeypatch.setattr("os.read", lambda fd, size: b"")
+    mock_select_select_factory(side_effect=lambda fds, *_: ([], [], []))
+    mock_truncate_output_factory(side_effect=lambda text, max_bytes, max_lines: ("hi\n", True))
+    mock_os_read_factory(return_value=b"")
     result = manager._read("sid3")
     assert result["output"].endswith("[truncated]")
 
@@ -204,25 +205,27 @@ def test_exec_command_input_casts_path_workdir():
     assert isinstance(validated.workdir, str)
 
 
-def test_read_breaks_on_os_error(monkeypatch):
+def test_read_breaks_on_os_error(mock_select_select_factory, mock_os_read_factory):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary)
     manager.sessions["err"] = type("S", (), {"proc": None, "fd": 55, "cwd": Path(".")})
     manager._cumulative["err"] = 0
-    monkeypatch.setattr("select.select", lambda fds, *_: (fds, [], []))
-    monkeypatch.setattr("os.read", lambda fd, size: (_ for _ in ()).throw(OSError("bad fd")))
+    mock_select_select_factory(side_effect=lambda fds, *_: (fds, [], []))
+    mock_os_read_factory(side_effect=lambda fd, size: (_ for _ in ()).throw(OSError("bad fd")))
     result = manager._read("err")
     assert result["output"] == ""
 
 
-def test_read_accumulates_and_marks_truncated(monkeypatch):
+def test_read_accumulates_and_marks_truncated(
+    mock_select_select_factory, mock_os_read_factory, mock_truncate_output_factory
+):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary, max_bytes=2, max_lines=10)
     manager.sessions["sidacc"] = type("S", (), {"proc": None, "fd": 77, "cwd": Path(".")})
     manager._cumulative["sidacc"] = 0
-    monkeypatch.setattr("select.select", lambda fds, *_: (fds, [], []))
-    monkeypatch.setattr("os.read", lambda fd, size: b"abc")
-    monkeypatch.setattr("lincona.tools.exec_pty.truncate_output", lambda text, max_bytes, max_lines: (text, False))
+    mock_select_select_factory(side_effect=lambda fds, *_: (fds, [], []))
+    mock_os_read_factory(return_value=b"abc")
+    mock_truncate_output_factory(side_effect=lambda text, max_bytes, max_lines: (text, False))
     result = manager._read("sidacc")
     assert result["output"].endswith("[truncated]")
 
@@ -240,7 +243,7 @@ def test_close_handles_os_error(monkeypatch):
         },
     )
     manager._cumulative["sid"] = 0
-    monkeypatch.setattr("lincona.tools.exec_pty.os.close", lambda fd: (_ for _ in ()).throw(OSError("closed")))
+    monkeypatch.setattr(exec_mod.os, "close", lambda fd: (_ for _ in ()).throw(OSError("closed")))
     manager.close("sid")
     assert "sid" not in manager.sessions
 
