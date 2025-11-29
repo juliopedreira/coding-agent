@@ -1,10 +1,10 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from lincona.tools.shell import run_shell, ShellTool, ShellInput, ShellOutput, tool_registrations
+from lincona.tools.shell import ShellInput, ShellOutput, ShellTool, run_shell, tool_registrations
 
 
 def test_shell_runs_command(monkeypatch: pytest.MonkeyPatch, restricted_boundary) -> None:

@@ -4,7 +4,7 @@ import pytest
 
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary, FsViolationError
-from lincona.tools.list_dir import list_dir, ListDirTool, ListDirInput, tool_registrations
+from lincona.tools.list_dir import ListDirInput, ListDirTool, list_dir, tool_registrations
 
 
 def test_lists_depth_and_limits(tmp_path: Path) -> None:

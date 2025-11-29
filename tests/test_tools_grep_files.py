@@ -5,7 +5,15 @@ import pytest
 import lincona.tools.grep_files as grep_mod
 from lincona.config import FsMode
 from lincona.tools.fs import FsBoundary
-from lincona.tools.grep_files import GrepFilesInput, GrepFilesTool, GrepFilesOutput, FileMatches, LineMatch, grep_files, tool_registrations
+from lincona.tools.grep_files import (
+    FileMatches,
+    GrepFilesInput,
+    GrepFilesOutput,
+    GrepFilesTool,
+    LineMatch,
+    grep_files,
+    tool_registrations,
+)
 
 
 def test_grep_matches_and_limit(tmp_path: Path) -> None:

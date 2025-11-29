@@ -221,8 +221,6 @@ def test_cli_main_entrypoint(monkeypatch):
 
 
 def test_main_handles_unknown_command_branch(monkeypatch):
-    parser = cli.build_parser()
-
     def fake_parse_args(self, argv=None):
         return argparse.Namespace(
             command="weird",

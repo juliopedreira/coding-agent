@@ -207,7 +207,6 @@ def test_skip_dev_null_deletion(monkeypatch, tmp_path: Path) -> None:
 
 def test_cleanup_tempfile_on_replace_error(monkeypatch, tmp_path: Path) -> None:
     boundary = FsBoundary(FsMode.RESTRICTED, root=tmp_path)
-    target = tmp_path / "err.txt"
     fp = SimpleNamespace(delete=False, path=Path("err.txt"), hunks=[])
     monkeypatch.setattr(apply_patch_mod, "parse_unified_diff", lambda txt: [fp])
 
@@ -278,10 +277,10 @@ def test_convert_results_and_end_event(tmp_path: Path) -> None:
     adapter = regs[0].result_adapter
     converted = adapter(apply_patch_mod.ApplyPatchOutput(results=[res]))  # type: ignore[arg-type]
     assert converted[0]["created"] is True
-    end = regs[0].end_event_builder(
-        None,
-        apply_patch_mod.ApplyPatchOutput(results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=False)]),  # type: ignore[arg-type]
+    end_output = apply_patch_mod.ApplyPatchOutput(
+        results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=False)]
     )
+    end = regs[0].end_event_builder(None, end_output)  # type: ignore[arg-type]
     assert end == {"files": 1}
 
 
@@ -335,7 +334,10 @@ def test_apply_patch_deletion_and_cleanup_and_helpers(monkeypatch: pytest.Monkey
     # result adapter helper
     regs = apply_patch_mod.tool_registrations(boundary)
     adapter = regs[0].result_adapter
-    converted = adapter(apply_patch_mod.ApplyPatchOutput(results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=True)]))  # type: ignore[arg-type]
+    converted_output = apply_patch_mod.ApplyPatchOutput(
+        results=[apply_patch_mod.PatchResultModel(path="p", bytes_written=1, created=True)]
+    )
+    converted = adapter(converted_output)  # type: ignore[arg-type]
     assert converted[0]["created"] is True
 
     # trailing newline helper

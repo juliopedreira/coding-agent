@@ -1,4 +1,3 @@
-
 import pytest
 
 import lincona.tools.router as router_module

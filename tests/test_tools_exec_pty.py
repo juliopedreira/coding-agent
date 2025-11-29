@@ -9,11 +9,10 @@ from lincona.config import FsMode
 from lincona.tools.exec_pty import (
     ExecCommandInput,
     ExecCommandOutput,
-    WriteStdinInput,
-    WriteStdinOutput,
     ExecTool,
-    WriteStdinTool,
     PtyManager,
+    WriteStdinInput,
+    WriteStdinTool,
     tool_registrations,
 )
 from lincona.tools.fs import FsBoundary
@@ -146,7 +145,6 @@ def test_close_handles_closed_fd(monkeypatch, restricted_boundary, fake_pty):
     mgr = PtyManager(restricted_boundary)
     monkeypatch.setattr(mgr, "_read", lambda sid: {"output": "", "truncated": False})
     mgr.exec_command("s1", "sleep 1", workdir=".")
-    session = mgr.sessions["s1"]
     monkeypatch.setattr(os, "close", lambda fd: None)
     mgr.close("s1")  # should not raise
 
@@ -232,7 +230,15 @@ def test_read_accumulates_and_marks_truncated(monkeypatch):
 def test_close_handles_os_error(monkeypatch):
     boundary = FsBoundary(FsMode.RESTRICTED, root=Path("."))
     manager = PtyManager(boundary)
-    manager.sessions["sid"] = type("S", (), {"proc": SimpleNamespace(terminate=lambda: None, wait=lambda timeout=2: None, kill=lambda: None), "fd": 90, "cwd": Path(".")})
+    manager.sessions["sid"] = type(
+        "S",
+        (),
+        {
+            "proc": SimpleNamespace(terminate=lambda: None, wait=lambda timeout=2: None, kill=lambda: None),
+            "fd": 90,
+            "cwd": Path("."),
+        },
+    )
     manager._cumulative["sid"] = 0
     monkeypatch.setattr("lincona.tools.exec_pty.os.close", lambda fd: (_ for _ in ()).throw(OSError("closed")))
     manager.close("sid")
