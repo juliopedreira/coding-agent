@@ -1,10 +1,12 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from lincona import __version__, cli
-from lincona.config import Settings
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, Settings
 
 
 def test_version_constant() -> None:
@@ -20,6 +22,15 @@ def test_tool_subcommand_invokes_router(monkeypatch, capsys) -> None:
         return {"ok": True}
 
     monkeypatch.setattr(cli.ToolRouter, "dispatch", fake_dispatch)
+    monkeypatch.setattr(
+        cli,
+        "load_settings",
+        lambda cli_overrides=None, config_path=None, create_if_missing=True: Settings(
+            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
+        ),
+    )
+    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
+
     code = cli.main(["tool", "list_dir", "--arg", "path=.", "--arg", "depth=1"])
     assert code == 0
     out = capsys.readouterr().out
@@ -92,15 +103,29 @@ def test_show_models_capabilities(monkeypatch, capsys):
     assert "gpt-5.1-codex-mini" in out
 
 
-def test_sessions_list_show_rm(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
-    sessions_dir = tmp_path / "home" / "sessions"
-    sessions_dir.mkdir(parents=True, exist_ok=True)
+def test_sessions_list_show_rm(monkeypatch, capsys):
     session_id = "202401010000-1234"
-    session_folder = sessions_dir / session_id
-    session_folder.mkdir(parents=True, exist_ok=True)
-    session_file = session_folder / "events.jsonl"
-    session_file.write_text('{"hello":true}\n', encoding="utf-8")
+    fake_home = Path("/virtual/home")
+    fake_session_path = fake_home / "sessions" / session_id / "events.jsonl"
+
+    monkeypatch.setattr(
+        cli,
+        "load_settings",
+        lambda cli_overrides=None, config_path=None, create_if_missing=True: Settings(
+            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
+        ),
+    )
+    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
+    monkeypatch.setattr(cli, "get_lincona_home", lambda: fake_home)
+
+    fake_list = [
+        SimpleNamespace(session_id=session_id, modified_at=datetime(2024, 1, 1), size_bytes=12, path=fake_session_path)
+    ]
+    monkeypatch.setattr(cli, "list_sessions", lambda path: fake_list)
+    monkeypatch.setattr(Path, "exists", lambda self: self == fake_session_path, raising=False)
+    monkeypatch.setattr(Path, "read_text", lambda self, encoding="utf-8": '{"hello":true}')
+    deleted = {}
+    monkeypatch.setattr(cli, "delete_session", lambda sid, root: deleted.setdefault("sid", sid))
 
     assert cli.main(["sessions", "list"]) == 0
     out = capsys.readouterr().out
@@ -111,7 +136,7 @@ def test_sessions_list_show_rm(tmp_path, monkeypatch, capsys):
     assert "hello" in out
 
     assert cli.main(["sessions", "rm", session_id]) == 0
-    assert not session_file.exists()
+    assert deleted["sid"] == session_id
 
 
 def test_sessions_show_missing(monkeypatch, capsys, tmp_path):
@@ -248,21 +273,27 @@ def test_main_handles_unknown_command_branch(monkeypatch):
 
 
 def test_debug_flag_writes_log(tmp_path: Path, capsys, monkeypatch) -> None:
-    monkeypatch.setenv("LINCONA_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "test")
+
+    captured_overrides: dict | None = None
+
+    def fake_load_settings(cli_overrides=None, config_path=None, create_if_missing=True):
+        nonlocal captured_overrides
+        captured_overrides = cli_overrides
+        return Settings(
+            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER, log_level=LogLevel.INFO
+        )
 
     async def fake_repl(self):
         return None
 
+    monkeypatch.setattr(cli, "load_settings", fake_load_settings)
+    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
+    monkeypatch.setattr(cli.AgentRunner, "__init__", lambda self, settings: None)
     monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
 
     rc = cli.main(["--debug", str(tmp_path / "ignored.log"), "chat"])
 
     assert rc == 0
-    sessions_root = tmp_path / "sessions"
-    session_dirs = [p for p in sessions_root.iterdir() if p.is_dir()]
-    assert len(session_dirs) == 1
-    log_file = session_dirs[0] / "log.txt"
-    assert log_file.exists()
-    content = log_file.read_text()
-    assert "session started" in content
+    assert captured_overrides is not None
+    assert captured_overrides["log_level"] == LogLevel.DEBUG

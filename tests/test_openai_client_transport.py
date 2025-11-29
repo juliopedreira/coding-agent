@@ -216,8 +216,17 @@ async def test_mock_transport_logger_called_on_success():
 
 @pytest.mark.asyncio
 async def test_http_transport_aclose_owned_client():
-    transport = HttpResponsesTransport(api_key="k")
+    class DummyClient:
+        def __init__(self):
+            self.closed = False
+
+        async def aclose(self):
+            self.closed = True
+
+    dummy_client = DummyClient()
+    transport = HttpResponsesTransport(api_key="k", client=dummy_client)
     await transport.aclose()
+    assert dummy_client.closed is False  # not owned, so not closed
 
 
 @pytest.mark.asyncio

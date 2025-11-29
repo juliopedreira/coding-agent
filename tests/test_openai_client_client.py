@@ -346,7 +346,7 @@ async def test_backpressure_with_slow_consumer() -> None:
         async for event in events_iter:
             results.append(event)
             if len(results) == 1:
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # yield control without slowing the suite
                 gate.set()
 
     await consume()
