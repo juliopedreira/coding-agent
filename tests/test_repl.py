@@ -1,5 +1,6 @@
 import asyncio
 import io
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,8 @@ def test_run_turn_text_only(settings, monkeypatch, tmp_path, capsys):
 
 def test_run_turn_tool_call(settings, monkeypatch, tmp_path):
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("lincona.sessions.JsonlEventWriter", lambda path, fsync_every=None: SimpleNamespace(append=lambda e: None))
+    monkeypatch.setattr("lincona.logging.configure_session_logger", lambda *a, **k: SimpleNamespace(info=lambda *a, **k: None))
     transport = SequenceTransport(
         [
             [

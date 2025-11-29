@@ -16,15 +16,37 @@ from lincona.openai_client.transport import (
 async def test_http_transport_streams_and_sets_headers() -> None:
     recorded: dict[str, Any] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        recorded["method"] = request.method
-        recorded["url"] = str(request.url)
-        recorded["headers"] = request.headers
-        recorded["payload"] = json.loads(request.content.decode())
-        body = 'data: {"delta":"hi"}\n\ndata: [DONE]\n'
-        return httpx.Response(200, text=body, request=request)
+    class FakeStreamCtx:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"x-request-id": "req-1"}
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def aiter_lines(self):
+            yield 'data: {"delta":"hi"}'
+            yield "data: [DONE]"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self):
+            self.calls: list[dict[str, object]] = []
+
+        def stream(self, method, url, json=None, headers=None, timeout=None):
+            lowered = {k.lower(): v for k, v in (headers or {}).items()}
+            recorded.update(method=method, url=url, payload=json, headers=lowered)
+            return FakeStreamCtx()
+
+        async def aclose(self):
+            return None
+
+    client = FakeClient()
     transport = HttpResponsesTransport(api_key="abc", client=client)
 
     chunks = []
@@ -32,7 +54,6 @@ async def test_http_transport_streams_and_sets_headers() -> None:
         chunks.append(chunk)
 
     await transport.aclose()
-    await client.aclose()
 
     assert recorded["method"] == "POST"
     assert recorded["url"] == "https://api.openai.com/v1/responses"

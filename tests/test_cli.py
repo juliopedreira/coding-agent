@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,46 +14,53 @@ def test_version_constant() -> None:
     assert __version__ == "0.1.0"
 
 
-def test_tool_subcommand_invokes_router(monkeypatch, capsys) -> None:
+def test_tool_subcommand_invokes_router(monkeypatch) -> None:
     called = {}
 
-    def fake_dispatch(self, name, **kwargs):
-        called["name"] = name
-        called["kwargs"] = kwargs
-        return {"ok": True}
+    class DummyRouter:
+        def dispatch(self, name, **kwargs):
+            called["name"] = name
+            called["kwargs"] = kwargs
+            return {"ok": True}
 
-    monkeypatch.setattr(cli.ToolRouter, "dispatch", fake_dispatch)
-    monkeypatch.setattr(
-        cli,
-        "load_settings",
-        lambda cli_overrides=None, config_path=None, create_if_missing=True: Settings(
-            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
-        ),
-    )
-    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
+    monkeypatch.setattr(cli, "ToolRouter", lambda boundary, approval_policy: DummyRouter())
+    settings = Settings(api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
+    args = argparse.Namespace(name="list_dir", json_payload=None, arg=["path=.", "depth=1"], command="tool")
+    printed: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
 
-    code = cli.main(["tool", "list_dir", "--arg", "path=.", "--arg", "depth=1"])
+    code = cli._run_tool(settings, args)
+
     assert code == 0
-    out = capsys.readouterr().out
-    assert '"ok": true' in out.lower()
+    assert '"ok": true' in printed[0].lower()
     assert called["name"] == "list_dir"
     assert called["kwargs"]["path"] == "."
 
 
 def test_config_path(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
-    code = cli.main(["config", "path"])
+    settings = Settings(api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
+    args = argparse.Namespace(config_cmd="path")
+    printed: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(str(a[0])))
+
+    code = cli._run_config(settings, args)
+
     assert code == 0
-    out = capsys.readouterr().out.strip()
-    assert out.endswith("config.toml")
+    assert printed[0].endswith("config.toml")
 
 
 def test_config_print(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
-    code = cli.main(["config", "print"])
+    settings = Settings(api_key="test", model="demo-model", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
+    args = argparse.Namespace(config_cmd="print")
+    printed: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(a[0]))
+
+    code = cli._run_config(settings, args)
+
     assert code == 0
-    out = capsys.readouterr().out
-    assert "model" in out
+    assert "demo-model" in printed[0]
 
 
 def test_chat_runs_with_stub(monkeypatch):
@@ -62,21 +70,17 @@ def test_chat_runs_with_stub(monkeypatch):
         called["ran"] = True
 
     monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
-    # Provide dummy api key to avoid SystemExit in AgentRunner creation
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-    # Also stub AgentRunner __init__ to skip heavy setup
-    original_init = cli.AgentRunner.__init__
 
-    def fake_init(self, settings):  # type: ignore[override]
+    def fake_init(self, settings):
         called["init"] = settings.model
         return None
 
     monkeypatch.setattr(cli.AgentRunner, "__init__", fake_init)
-    code = cli.main(["--model", "gpt-5.1-codex-mini", "chat"])
-    assert code == 0
+
+    asyncio.run(cli._run_chat(Settings(api_key="test", model="gpt-5.1-codex-mini", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)))
+
     assert called["init"] == "gpt-5.1-codex-mini"
     assert called["ran"] is True
-    monkeypatch.setattr(cli.AgentRunner, "__init__", original_init)
 
 
 def test_show_models_capabilities(monkeypatch, capsys):
@@ -95,29 +99,20 @@ def test_show_models_capabilities(monkeypatch, capsys):
         def __init__(self, api_key=None):
             self.models = FakeModels()
 
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setattr(cli, "OpenAI", FakeClient)
-    rc = cli.main(["--show-models-capabilities"])
+    settings = Settings(api_key="k", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER)
+    rc = cli._run_show_models_capabilities(settings)
     assert rc == 0
     out = capsys.readouterr().out
     assert "gpt-5.1-codex-mini" in out
 
 
-def test_sessions_list_show_rm(monkeypatch, capsys):
+def test_sessions_list_show_rm(monkeypatch):
     session_id = "202401010000-1234"
     fake_home = Path("/virtual/home")
     fake_session_path = fake_home / "sessions" / session_id / "events.jsonl"
 
-    monkeypatch.setattr(
-        cli,
-        "load_settings",
-        lambda cli_overrides=None, config_path=None, create_if_missing=True: Settings(
-            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER
-        ),
-    )
-    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
     monkeypatch.setattr(cli, "get_lincona_home", lambda: fake_home)
-
     fake_list = [
         SimpleNamespace(session_id=session_id, modified_at=datetime(2024, 1, 1), size_bytes=12, path=fake_session_path)
     ]
@@ -127,24 +122,35 @@ def test_sessions_list_show_rm(monkeypatch, capsys):
     deleted = {}
     monkeypatch.setattr(cli, "delete_session", lambda sid, root: deleted.setdefault("sid", sid))
 
-    assert cli.main(["sessions", "list"]) == 0
-    out = capsys.readouterr().out
-    assert session_id in out
+    printed: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(" ".join(str(x) for x in a)))
 
-    assert cli.main(["sessions", "show", session_id]) == 0
-    out = capsys.readouterr().out
-    assert "hello" in out
+    list_args = argparse.Namespace(sessions_cmd="list", session_id=None)
+    show_args = argparse.Namespace(sessions_cmd="show", session_id=session_id)
+    rm_args = argparse.Namespace(sessions_cmd="rm", session_id=session_id)
 
-    assert cli.main(["sessions", "rm", session_id]) == 0
+    assert cli._run_sessions(list_args) == 0
+    assert session_id in printed[0]
+
+    assert cli._run_sessions(show_args) == 0
+    assert "hello" in printed[1]
+
+    assert cli._run_sessions(rm_args) == 0
     assert deleted["sid"] == session_id
 
 
 def test_sessions_show_missing(monkeypatch, capsys, tmp_path):
-    monkeypatch.setenv("LINCONA_HOME", str(tmp_path / "home"))
-    rc = cli.main(["sessions", "show", "missing-session"])
-    err = capsys.readouterr().err
+    fake_home = Path("/virtual/home")
+    monkeypatch.setattr(cli, "get_lincona_home", lambda: fake_home)
+    monkeypatch.setattr(Path, "exists", lambda self: False, raising=False)
+    printed_err: list[str] = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: printed_err.append(a[0]))
+    args = argparse.Namespace(sessions_cmd="show", session_id="missing-session")
+
+    rc = cli._run_sessions(args)
+
     assert rc == 1
-    assert "not found" in err
+    assert "not found" in printed_err[0]
 
 
 def test_tool_arg_requires_equals():
@@ -273,27 +279,13 @@ def test_main_handles_unknown_command_branch(monkeypatch):
 
 
 def test_debug_flag_writes_log(tmp_path: Path, capsys, monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-
-    captured_overrides: dict | None = None
-
-    def fake_load_settings(cli_overrides=None, config_path=None, create_if_missing=True):
-        nonlocal captured_overrides
-        captured_overrides = cli_overrides
-        return Settings(
-            api_key="test", fs_mode=FsMode.RESTRICTED, approval_policy=ApprovalPolicy.NEVER, log_level=LogLevel.INFO
-        )
-
-    async def fake_repl(self):
-        return None
-
-    monkeypatch.setattr(cli, "load_settings", fake_load_settings)
-    monkeypatch.setattr(cli, "_configure_base_logging", lambda debug_enabled=False, lincona_level=None: None)
-    monkeypatch.setattr(cli.AgentRunner, "__init__", lambda self, settings: None)
-    monkeypatch.setattr(cli.AgentRunner, "repl", fake_repl)
-
-    rc = cli.main(["--debug", str(tmp_path / "ignored.log"), "chat"])
-
-    assert rc == 0
-    assert captured_overrides is not None
-    assert captured_overrides["log_level"] == LogLevel.DEBUG
+    args = argparse.Namespace(
+        model=None,
+        reasoning=None,
+        verbosity=None,
+        fs_mode=None,
+        approval_policy=None,
+        log_level=None,
+    )
+    overrides = cli._collect_overrides(args, debug_enabled=True)
+    assert overrides["log_level"] == LogLevel.DEBUG.value
