@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from lincona.config import FsMode
+from lincona.config import ApprovalPolicy, FsMode, LogLevel, ModelCapabilities, ReasoningEffort, Settings, Verbosity
 from lincona.sessions import Event
 from lincona.tools.fs import FsBoundary
 
@@ -662,6 +662,63 @@ def mock_transport_error(mock_responses_transport):
     return _factory
 
 
+@pytest.fixture
+def success_transport(mock_responses_transport):
+    """Preset transport that yields [DONE] immediately (most common success case)."""
+    return mock_responses_transport(chunks=["data: [DONE]\n"])
+
+
+@pytest.fixture
+def text_delta_transport(mock_responses_transport):
+    """Preset transport with text delta chunks followed by [DONE]."""
+    return mock_responses_transport(
+        chunks=[
+            'data: {"type":"text_delta","delta":{"text":"hello"}}\n',
+            "data: [DONE]\n",
+        ]
+    )
+
+
+@pytest.fixture
+def tool_call_transport(mock_responses_transport):
+    """Preset transport with tool call sequence followed by [DONE]."""
+    return mock_responses_transport(
+        chunks=[
+            'data: {"type":"tool_call_start","delta":{"id":"tc1","name":"list_dir","arguments":""}}\n',
+            'data: {"type":"tool_call_delta","delta":{"id":"tc1","arguments_delta":"{\\"path\\": \\".\\"}"}}\n',
+            (
+                'data: {"type":"tool_call_end","delta":{"id":"tc1","name":"list_dir",'
+                '"arguments":"{\\"path\\": \\".\\"}"}}\n'
+            ),
+            "data: [DONE]\n",
+        ]
+    )
+
+
+@pytest.fixture
+def empty_transport(mock_responses_transport):
+    """Preset transport that yields nothing (for error cases or empty responses)."""
+    return mock_responses_transport(chunks=[])
+
+
+@pytest.fixture
+def single_chunk_transport(mock_responses_transport):
+    """Factory fixture for creating transports with a single chunk."""
+
+    def _factory(chunk: str | bytes) -> Any:
+        """Create transport with single chunk.
+
+        Args:
+            chunk: Single chunk to yield
+
+        Returns:
+            Transport instance yielding the single chunk
+        """
+        return mock_responses_transport(chunks=[chunk])
+
+    return _factory
+
+
 # ============================================================================
 # Common Path Mock Presets
 # ============================================================================
@@ -717,6 +774,70 @@ def mock_path_iterdir(mock_path_methods):
 
 
 # ============================================================================
+# Common Settings Fixtures
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def default_settings() -> Settings:
+    """Session-scoped default Settings for tests with standard configuration."""
+    models = {
+        "gpt-5.1-codex-mini": ModelCapabilities(
+            reasoning_effort=(
+                ReasoningEffort.NONE,
+                ReasoningEffort.MINIMAL,
+                ReasoningEffort.LOW,
+                ReasoningEffort.MEDIUM,
+                ReasoningEffort.HIGH,
+            ),
+            default_reasoning=ReasoningEffort.MINIMAL,
+            verbosity=(Verbosity.LOW, Verbosity.MEDIUM, Verbosity.HIGH),
+            default_verbosity=Verbosity.MEDIUM,
+        )
+    }
+    return Settings(
+        api_key="test",
+        model="gpt-5.1-codex-mini",
+        reasoning_effort=ReasoningEffort.MINIMAL,
+        verbosity=Verbosity.MEDIUM,
+        models=models,
+        fs_mode=FsMode.UNRESTRICTED,
+        approval_policy=ApprovalPolicy.NEVER,
+        log_level=LogLevel.ERROR,
+    )
+
+
+@pytest.fixture
+def restricted_settings(default_settings: Settings) -> Settings:
+    """Settings with RESTRICTED fs_mode for tests requiring restricted filesystem."""
+    return Settings(**{**default_settings.model_dump(), "fs_mode": FsMode.RESTRICTED})
+
+
+@pytest.fixture
+def unrestricted_settings(default_settings: Settings) -> Settings:
+    """Settings with UNRESTRICTED fs_mode (same as default, but explicit)."""
+    return Settings(**{**default_settings.model_dump(), "fs_mode": FsMode.UNRESTRICTED})
+
+
+@pytest.fixture
+def settings_factory(default_settings: Settings):
+    """Factory fixture for creating custom Settings with overrides."""
+
+    def _factory(**overrides) -> Settings:
+        """Create Settings with custom overrides.
+
+        Args:
+            **overrides: Settings fields to override
+
+        Returns:
+            New Settings instance with overrides applied
+        """
+        return Settings(**{**default_settings.model_dump(), **overrides})
+
+    return _factory
+
+
+# ============================================================================
 # Consolidated CLI Mock Fixtures
 # ============================================================================
 
@@ -764,5 +885,39 @@ def mock_cli_path_methods(mocker):
             mocker.patch.object(Path, "read_text", autospec=True, side_effect=read_text)
         else:
             mocker.patch.object(Path, "read_text", autospec=True, return_value=read_text)
+
+    return _factory
+
+
+@pytest.fixture
+def mock_sessions_fixture(mocker):
+    """Fixture that patches session-related functions (get_lincona_home, list_sessions, delete_session)."""
+
+    def _factory(
+        home: Path | None = None,
+        sessions: list[Any] | None = None,
+        delete_side_effect: Any | None = None,
+        patch_delete: bool = False,
+    ):
+        """Create mocks for session-related functions.
+
+        Args:
+            home: Path to return from get_lincona_home (default: /virtual/home)
+            sessions: List of sessions to return from list_sessions (default: empty list)
+            delete_side_effect: Side effect for delete_session (only used if patch_delete=True)
+            patch_delete: Whether to patch delete_session (default: False, to avoid conflicts)
+        """
+        if home is None:
+            home = Path("/virtual/home")
+        mocker.patch("lincona.cli.get_lincona_home", autospec=True, return_value=home)
+
+        if sessions is not None:
+            mocker.patch("lincona.cli.list_sessions", autospec=True, return_value=sessions)
+
+        if patch_delete:
+            if delete_side_effect is not None:
+                mocker.patch("lincona.cli.delete_session", autospec=True, side_effect=delete_side_effect)
+            else:
+                mocker.patch("lincona.cli.delete_session", autospec=True)
 
     return _factory

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lincona.config import ApprovalPolicy, FsMode, LogLevel, ModelCapabilities, ReasoningEffort, Settings, Verbosity
+from lincona.config import ApprovalPolicy, FsMode, ModelCapabilities
 from lincona.openai_client.types import (
     ErrorEvent,
     Message,
@@ -21,35 +21,9 @@ from lincona.tools.router import ToolRouter
 
 
 @pytest.fixture()
-def settings():
-    models = {
-        "gpt-5.1-codex-mini": ModelCapabilities(
-            reasoning_effort=(
-                ReasoningEffort.NONE,
-                ReasoningEffort.MINIMAL,
-                ReasoningEffort.LOW,
-                ReasoningEffort.MEDIUM,
-                ReasoningEffort.HIGH,
-            ),
-            default_reasoning=ReasoningEffort.MINIMAL,
-            verbosity=(
-                Verbosity.LOW,
-                Verbosity.MEDIUM,
-                Verbosity.HIGH,
-            ),
-            default_verbosity=Verbosity.MEDIUM,
-        )
-    }
-    return Settings(
-        api_key="test",
-        model="gpt-5.1-codex-mini",
-        reasoning_effort=ReasoningEffort.MINIMAL,
-        verbosity=Verbosity.MEDIUM,
-        models=models,
-        fs_mode=FsMode.UNRESTRICTED,
-        approval_policy=ApprovalPolicy.NEVER,
-        log_level=LogLevel.ERROR,
-    )
+def settings(default_settings):
+    """Reuse default_settings fixture for REPL tests."""
+    return default_settings
 
 
 @pytest.mark.asyncio
@@ -120,10 +94,9 @@ def test_execute_tools_invalid_json(settings, tmp_path, sequence_transport):
 
 @pytest.mark.asyncio
 async def test_slash_commands_update_state(
-    settings, mocker, tmp_path, no_session_io, sequence_transport, mock_lincona_home
+    settings, mocker, tmp_path, no_session_io, success_transport, mock_lincona_home
 ):
-    transport = sequence_transport([['data: {"type":"response.done"}']])
-    runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
+    runner = AgentRunner(settings, transport=success_transport, boundary_root=tmp_path)
 
     await runner._handle_slash("/model:set gpt-5.1-codex-mini:minimal:low")
     assert runner.settings.model == "gpt-5.1-codex-mini"
@@ -144,15 +117,8 @@ async def test_slash_commands_update_state(
     assert runner.fs_mode == FsMode.UNRESTRICTED
 
 
-def test_execute_tools_serializes_patch_result(settings, tmp_path, sequence_transport):
-    transport = sequence_transport(
-        [
-            [
-                'data: {"type":"response.done"}',
-            ]
-        ]
-    )
-    runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
+def test_execute_tools_serializes_patch_result(settings, tmp_path, success_transport):
+    runner = AgentRunner(settings, transport=success_transport, boundary_root=tmp_path)
 
     # replace router dispatch to return a dataclass result
     class DataclassRouter:
@@ -168,10 +134,9 @@ def test_execute_tools_serializes_patch_result(settings, tmp_path, sequence_tran
 
 @pytest.mark.asyncio
 async def test_model_commands_list_and_set_validation(
-    settings, mocker, tmp_path, no_session_io, sequence_transport, mock_lincona_home, mock_print
+    settings, mocker, tmp_path, no_session_io, success_transport, mock_lincona_home, mock_print
 ):
-    transport = sequence_transport([['data: {"type":"response.done"}']])
-    runner = AgentRunner(settings, transport=transport, boundary_root=tmp_path)
+    runner = AgentRunner(settings, transport=success_transport, boundary_root=tmp_path)
 
     print_mock = mock_print
 
@@ -189,7 +154,7 @@ async def test_model_commands_list_and_set_validation(
 
 @pytest.mark.asyncio
 async def test_model_set_rejects_unsupported_verbosity(
-    settings, mocker, tmp_path, no_session_io, sequence_transport, mock_lincona_home, mock_print
+    settings, mocker, tmp_path, no_session_io, success_transport, mock_lincona_home, mock_print, settings_factory
 ):
     # remove verbosity support to force rejection
     stripped_models = {
@@ -200,9 +165,8 @@ async def test_model_set_rejects_unsupported_verbosity(
             default_verbosity=None,
         )
     }
-    patched_settings = Settings(**{**settings.model_dump(), "models": stripped_models})
-    transport = sequence_transport([['data: {"type":"response.done"}']])
-    runner = AgentRunner(patched_settings, transport=transport, boundary_root=tmp_path)
+    patched_settings = settings_factory(models=stripped_models)
+    runner = AgentRunner(patched_settings, transport=success_transport, boundary_root=tmp_path)
     print_mock = mock_print
 
     await runner._handle_slash("/model:set gpt-5.1-codex-mini:none:low")
@@ -210,16 +174,14 @@ async def test_model_set_rejects_unsupported_verbosity(
     assert "verbosity 'low' not supported" in output
 
 
-def _stub_runner(settings, events, mocker, no_session_io, sequence_transport, dummy_client_factory):
-    runner = AgentRunner(
-        settings, transport=sequence_transport([['data: {"type":"response.done"}']]), boundary_root=Path(".")
-    )
+def _stub_runner(settings, events, mocker, no_session_io, success_transport, dummy_client_factory):
+    runner = AgentRunner(settings, transport=success_transport, boundary_root=Path("."))
     runner.client = dummy_client_factory(events)
     return runner
 
 
 @pytest.mark.asyncio
-async def test_handle_stream_event_variants(settings, mocker, no_session_io, sequence_transport, dummy_client_factory):
+async def test_handle_stream_event_variants(settings, mocker, no_session_io, success_transport, dummy_client_factory):
     events = [
         TextDelta(text="chunk"),
         ToolCallStart(tool_call=ToolCallPayload(id="c1", name="t", arguments="")),
@@ -227,7 +189,7 @@ async def test_handle_stream_event_variants(settings, mocker, no_session_io, seq
         ToolCallEnd(tool_call=ToolCallPayload(id="c1", name="t", arguments="{}")),
         MessageDone(finish_reason=None),
     ]
-    runner = _stub_runner(settings, events, mocker, no_session_io, sequence_transport, dummy_client_factory)
+    runner = _stub_runner(settings, events, mocker, no_session_io, success_transport, dummy_client_factory)
     runner.router = ToolRouter(FsBoundary(FsMode.UNRESTRICTED), ApprovalPolicy.NEVER)  # real router needed
     # ensure tool call execution returns non-empty output to exercise logging branch
     runner._execute_tools = lambda calls: [
@@ -293,12 +255,12 @@ def test_print_model_list_text_path(
 
 
 def test_set_model_missing_defaults(
-    mocker, settings, no_session_io, sequence_transport, mock_print, dummy_client_factory
+    mocker, settings, no_session_io, success_transport, mock_print, dummy_client_factory, settings_factory
 ):
     caps = ModelCapabilities(reasoning_effort=(), default_reasoning=None, verbosity=(), default_verbosity=None)
-    settings = Settings(**{**settings.model_dump(), "models": {"empty": caps}, "model": "empty"})
+    settings = settings_factory(models={"empty": caps}, model="empty")
     runner = _stub_runner(
-        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, sequence_transport, dummy_client_factory
+        settings, [MessageDone(finish_reason=None)], mocker, no_session_io, success_transport, dummy_client_factory
     )
     print_mock = mock_print
     runner._set_model("empty")
@@ -306,9 +268,9 @@ def test_set_model_missing_defaults(
     assert "no default reasoning" in output
 
 
-def test_require_api_key_raises(settings, sequence_transport):
-    no_key = Settings(**{**settings.model_dump(), "api_key": None})
-    runner = AgentRunner(no_key, transport=sequence_transport([['data: {"type":"response.done"}']]))
+def test_require_api_key_raises(settings, success_transport, settings_factory):
+    no_key = settings_factory(api_key=None)
+    runner = AgentRunner(no_key, transport=success_transport)
     with pytest.raises(SystemExit):
         runner._require_api_key()
 

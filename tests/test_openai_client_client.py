@@ -59,7 +59,7 @@ async def test_builds_payload_and_streams_events(capturing_transport) -> None:
 
 
 @pytest.mark.asyncio
-async def test_includes_freeform_tool(capturing_transport) -> None:
+async def test_includes_freeform_tool(capturing_transport, success_transport) -> None:
     transport = capturing_transport(chunks=["data: [DONE]\n"])
     client = OpenAIResponsesClient(transport)
 
